@@ -1,23 +1,23 @@
 resolver: nightly-2017-08-17
 packages:
   - .
-  - ../../dev/libs/dependent-state
-  - ../../dev/libs/lens-utils
-  - ../../dev/libs/prologue
-  - ../../dev/libs/container
-  - ../../dev/libs/convert
-  - ../../dev/libs/data-layer
-  - ../../dev/libs/data-construction
-  - ../../dev/libs/data-repr
-  - ../../dev/libs/impossible
-  - ../../dev/libs/typelevel
-  - ../../dev/libs/data-rtuple
-  - ../../dev/libs/data-prop
-  - ../../dev/libs/monad-branch
-  - ../../dev/libs/monoid
-  - ../../dev/libs/functor-utils
-  - ../../dev/libs/layouting
-  - ../../dev/libs/terminal-text
+  - ../../libs/dependent-state
+  - ../../libs/lens-utils
+  - ../../libs/prologue
+  - ../../libs/container
+  - ../../libs/convert
+  - ../../libs/data-layer
+  - ../../libs/data-construction
+  - ../../libs/data-repr
+  - ../../libs/impossible
+  - ../../libs/typelevel
+  - ../../libs/data-rtuple
+  - ../../libs/data-prop
+  - ../../libs/monad-branch
+  - ../../libs/monoid
+  - ../../libs/functor-utils
+  - ../../libs/layouting
+  - ../../libs/terminal-text
 
 
 

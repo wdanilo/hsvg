@@ -17,6 +17,7 @@ dependencies:
     - dependent-state
     - text
     - matrix
+    - hashable
 
 default-extensions:
     - AllowAmbiguousTypes
