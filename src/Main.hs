@@ -51,36 +51,134 @@ data Boolean a
 
 
 
+class Sub a b where
+    type family SubResult a b
+    (/-) :: a -> b -> SubResult a b
+
+class Add a b where
+    type family AddResult a b
+    (/+) :: a -> b -> AddResult a b
+
+class Div a b where
+    type family DivResult a b
+    (//) :: a -> b -> DivResult a b
+
+class Mul a b where
+    type family MulResult a b
+    (/*) :: a -> b -> MulResult a b
+
+
 -----------------
 -- === Dim === --
 -----------------
+
+-- === Definition === --
 
 class           Dim1 a where x :: Lens' a Double
 class Dim1 a => Dim2 a where y :: Lens' a Double
 class Dim2 a => Dim3 a where z :: Lens' a Double
 
+
+-- === Utils === --
+
+dist :: Dim2 a => a -> a -> Double
+dist start end = sqrt $ dx * dx + dy * dy where
+    dx = end^.x - start^.x
+    dy = end^.y - start^.y
+
+len :: Dim2 a => a -> Double
+len a = sqrt $ (a ^. x) * (a ^. x) + (a ^. y) * (a ^. y)
+
+
+
 --------------------
 -- === Points === --
 --------------------
 
-data Point = Point { __x :: Double, __y :: Double } deriving (Eq, Ord, Show)
+-- === Definition === --
+
+data Point = Point { __1 :: Double, __2 :: Double } deriving (Eq, Ord, Show)
+makeLenses ''Point
+
+
+-- === Utils === --
+
+angle :: Point -> Point -> Double
+angle (Point sx sy) (Point ex ey) = atan2 (ey - sy) (ex - sx)
+
+
+-- === Instances === --
+
+instance Dim1 Point where x = point_1
+instance Dim2 Point where y = point_2
+
+instance (a~b, a~Double) => Convertible (a,b) Point where convert (a,b) = Point a b
+instance (a~b, a~Double) => Convertible Point (a,b) where convert (Point a b) = (a,b)
+
+
+
+---------------------
+-- === Vectors === --
+---------------------
+
+-- === Definition === --
+
+data Vector = Vector { __1 :: Double, __2 :: Double }
+makeLenses ''Vector
+
+instance Dim1 Vector where x = vector_1
+instance Dim2 Vector where y = vector_2
+
+
+-- === Utils === --
+
+unit :: Vector -> Vector
+unit v = v // len v
+
+
+-- === Arithmetic === ---
+
+instance Sub Point Point where
+    type SubResult Point Point = Vector
+    Point x y /- Point x' y' = Vector (x - x') (y - y')
+
+instance Add Point Vector where
+    type AddResult Point Vector = Point
+    Point x y /+ Vector x' y' = Point (x + x') (y + y')
+
+instance Div Vector Double where
+    type DivResult Vector Double = Vector
+    Vector x y // a = Vector (x/a) (y/a)
+
+instance Mul Vector Double where
+    type MulResult Vector Double = Vector
+    Vector x y /* a = Vector (x*a) (y*a)
+
+
+-- === Instances === --
+
+instance Num Vector where
+    Vector x y + Vector x' y' = Vector (x + x') (y + y')
+    Vector x y - Vector x' y' = Vector (x - x') (y - y')
+
+
+
+--------------------------
+-- === ControlPoint === --
+--------------------------
+
 data ControlPoint = ControlPoint
     { _leftHandle  :: Maybe Point
     , _rightHandle :: Maybe Point
     , _point       :: Point
     } deriving (Eq, Ord, Show)
-
-makeLenses ''Point
 makeLenses ''ControlPoint
 
-instance (a~b, a~Double) => Convertible (a,b) Point where
-  convert = uncurry Point
 
 instance (a~b, a~Double) => Convertible (a,b) ControlPoint where
   convert = ControlPoint mempty mempty . convert
 
-instance Dim1 Point where x = point_x
-instance Dim2 Point where y = point_y
+
 
 pt   ::                     Double -> Double                     -> ControlPoint
 lpt  :: Double -> Double -> Double -> Double                     -> ControlPoint
@@ -93,37 +191,6 @@ lrpt lx ly x y rx ry = ControlPoint (Just $ Point lx ly) (Just $ Point rx ry) $ 
 
 
 
----------------------
--- === Vectors === --
----------------------
-
-data Vector = Vector { __x :: Double, __y :: Double }
-makeLenses ''Vector
-
-len :: Vector -> Double
-len v = sqrt $ (v ^. x) * (v ^. x) + (v ^. y) * (v ^. y)
-
-sub :: Point -> Point -> Vector
-sub (Point x y) (Point x' y') = Vector (x - x') (y - y')
-
-mul :: Double -> Vector -> Vector
-mul a (Vector x y) = Vector (x * a) (y * a)
-
-dv :: Double -> Vector -> Vector
-dv a (Vector x y) = Vector (x / a) (y / a)
-
-unit :: Vector -> Vector
-unit v = dv (len v) v
-
-txPt :: Vector -> Point -> Point
-txPt (Vector x y) (Point x' y') = Point (x + x') (y + y')
-
-instance Dim1 Vector where x = vector_x
-instance Dim2 Vector where y = vector_y
-
-instance Num Vector where
-    Vector x y + Vector x' y' = Vector (x + x') (y + y')
-    Vector x y - Vector x' y' = Vector (x - x') (y - y')
 
 
 ---------------------------
@@ -134,6 +201,33 @@ data SmoothPoint = SmoothPoint { _point :: Point, _smooth :: Double } deriving (
 
 spt :: Double -> Double -> Double -> SmoothPoint
 spt x y s = SmoothPoint (Point x y) s
+
+
+------------------
+-- === BBox === --
+------------------
+
+data BBox = BBox { _topLeft :: Point, _width :: Double, _height :: Double } deriving (Show)
+makeLenses ''BBox
+
+class Bounding a where
+    bbox :: a -> BBox
+
+bbcat :: BBox -> BBox -> BBox
+bbcat (BBox (Point x y) w h) (BBox (Point x' y') w' h') = BBox (Point left top) (right - left) (bottom - top) where
+    left   = min x x'
+    top    = min y y'
+    right  = max (x + w) (x' + w')
+    bottom = max (y + h) (y' + h')
+
+instance Mempty BBox where mempty = BBox (Point 0 0) 0 0
+
+instance Bounding a => Bounding (Boolean a) where
+    bbox = \case
+        Subtract  a b -> bbcat (bbox a) (bbox b)
+        Intersect a b -> bbcat (bbox a) (bbox b)
+        Merge     a b -> bbcat (bbox a) (bbox b)
+
 
 
 ----------------------
@@ -181,10 +275,6 @@ makeLenses ''Geo
 
 rect :: Double -> Double -> Geo
 rect = Geo mempty mempty . GeoSimple .: Rect
-
--- FIXME: rect' should logically replace rect
-rect' :: Double -> Double -> Geo
-rect' w h = move (-w/2) (-h/2) $ rect w h
 
 square :: Double -> Geo
 square a = rect a a
@@ -268,6 +358,48 @@ rotateRad a = (transform . wrapped) %~ Matrix.multStd2 m where
       , sin a,   cos a , 0
       , 0    , 0       , 1
       ]
+
+alignLeft :: Geo -> Geo
+alignLeft g = move (-x) 0 g where
+    BBox (Point x _) _ _ = bbox g
+
+alignRight :: Geo -> Geo
+alignRight g = move (-x-w) 0 g where
+    BBox (Point x _) w _ = bbox g
+
+alignTop :: Geo -> Geo
+alignTop g = move 0 (-y) g where
+    BBox (Point _ y) _ _ = bbox g
+
+alignBottom :: Geo -> Geo
+alignBottom g = move 0 (-y-h) g where
+    BBox (Point _ y) _ h = bbox g
+
+alignTopLeft, alignTopRight, alignBottomLeft, alignBottomRight :: Geo -> Geo
+alignTopLeft     = alignTop    . alignLeft
+alignTopRight    = alignTop    . alignRight
+alignBottomLeft  = alignBottom . alignLeft
+alignBottomRight = alignBottom . alignRight
+
+
+-- === Instances === --
+
+instance Bounding Geo where
+    bbox = bbox . view definition -- FIXME: handle transform
+
+instance Bounding GeoDef where
+    bbox = \case
+      GeoEmpty      -> mempty
+      GeoSimple   s -> bbox s
+      GeoCompound b -> bbox b
+
+instance Bounding Shape where
+  bbox = \case
+    Rect   w h -> BBox (Point (-w/2) (-h/2)) w h
+    Circle r   -> BBox (Point (-r/2) (-r/2)) r r
+    Arc    r _ -> BBox (Point (-r/2) (-r/2)) r r
+    -- Path   pts -> mconcat $ bbox <$> pts
+    -- Spath  pts -> mconcat $ bbox <$> pts
 
 
 -----------------------
@@ -387,7 +519,10 @@ renderGeoDef rest g = case g of
 
 -- M0 0 A 100 100 0 0 0 100 100 L 100 0
   GeoSimple s -> case s of
-    Rect w h -> return $ "<rect width=" <> quoted (show' w) <> " height=" <> quoted(show' h) <> rest <> "/>"
+    -- Rect w h -> return $ "<g><rect width=" <> quoted (show' w) <> " height=" <> quoted(show' h) <> " transform=\"translate(" <> show' (-w/2) <> "," <> show' (-h/2) <> ")\" " <> "/>" <> rest <> "/>"
+    Rect w h -> return $ "<g" <> rest <> ">"
+                           <> "<rect width=" <> quoted (show' w) <> " height=" <> quoted(show' h) <> " transform=\"translate(" <> show' (-w/2) <> "," <> show' (-h/2) <> ")\" " <> "/>"
+                         <> "</g>"
     Circle r -> return $ "<circle r=" <> quoted (show' r) <> rest <> "/>"
     Arc r a  -> return $ "<path d=" <> quoted ("M" <> show' (-r) <> " 0 A " <> show' r <> " " <> show' r <> " 0 " <> show' flag <> " 0 " <> show' nx <> " " <> show' ny <> "L 0 0 Z") <> rest <> "/>" where
         nx = - r * cos a
@@ -416,14 +551,14 @@ renderGeoDef rest g = case g of
 _w = 2880
 _h = 1800
 
-fullBg = fill "white" $ move (-_w) (-_h) $ rect (2*_w) (2*_h)
+fullBg = fill "white" $ rect (2*_w) (2*_h)
 
 roundedRect :: Double -> Double -> Double -> Double -> Double -> Double -> Geo
-roundedRect rtl rtr rbr rbl w h = move 0 h2 . path $ tl <> tr <> br <> bl where
-  tl   = if rtl == 0 then [pt 0 (-h2)] else [ pt 0 (-(h2-rtl')), lpt 0 (-h2) rtl' (-h2)   ]
-  tr   = if rtr == 0 then [pt w (-h2)] else [ pt (w-rtr') (-h2), lpt w (-h2) w (-h2+rtr') ]
-  br   = if rbr == 0 then [pt w h2]    else [ pt w (h2-rbr')   , lpt w h2 (w-rbr') h2     ]
-  bl   = if rbl == 0 then [pt 0 h2]    else [ pt rbl' h2       , lpt 0 h2 0 (h2-rbl')     ]
+roundedRect rtl rtr rbr rbl w h = path $ tl <> tr <> br <> bl where
+  tl   = if rtl == 0 then [pt (-w2) (-h2)] else [ pt (-w2) (-(h2-rtl')), lpt (-w2) (-h2) (rtl' - w2) (-h2) ]
+  tr   = if rtr == 0 then [pt w2    (-h2)] else [ pt (w2-rtr') (-h2)   , lpt w2 (-h2) w2 (-h2+rtr')        ]
+  br   = if rbr == 0 then [pt w2    h2]    else [ pt w2 (h2-rbr')      , lpt w2 h2 (w2-rbr') h2            ]
+  bl   = if rbl == 0 then [pt (-w2) h2]    else [ pt (rbl'-w2) h2      , lpt (-w2) h2 (-w2) (h2-rbl')      ]
   w2   = w/2
   h2   = h/2
   mwh  = min w h
@@ -482,15 +617,15 @@ tabHeight = 60
 
 -- 2880 x 1600
 navPanel :: Geo
-navPanel = fill panelColor $ rect 400 _h
+navPanel = fill panelColor $ alignTopLeft $ rect 400 _h
 
 graphPanel :: Geo
 graphPanel = fill panelColor $ bg + tb where
-    bg = move 0 tabHeight $ rect 2480 (_h - tabHeight)
+    bg = move 0 tabHeight $ alignTopLeft $ rect 2480 (_h - tabHeight)
     tb = tab 300
 
 vsep :: Double -> Geo
-vsep x = move x 0 $ mconcat
+vsep x = move x 0 $ alignTopLeft $ mconcat
          [ fill "#000000" (rect 4 _h)
          , fill "rgba(255,255,255,0.03)" (move 4 0 $ rect 2 _h)
          ]
@@ -503,6 +638,11 @@ tab w = fill panelColor $ path [pt 0 0, rpt w 0 (w + r) 0, lpt (w + slope - r) t
     r     = 70
     slope = 100
 
+portWidth :: Double
+portWidth = 6
+
+gridElemHeight :: Double
+gridElemHeight = 40
 
 compactNode :: [String] -> [String] -> Geo
 compactNode ins outs = ports ins + rotate 180 (ports outs) where
@@ -510,10 +650,17 @@ compactNode ins outs = ports ins + rotate 180 (ports outs) where
     port n s   = fill ("rgb(" <> convert (show $ round r) <> "," <> convert (show $ round g) <> "," <> convert (show $ round b) <> ")") $ portShape s where
         Color.RGB r g b _ = Color.lch2rgb $ buildLCH (Color $ hash n)
     ports ns  = mconcat $ (\(n,i) -> rotate (-i * 180 / num) $ port n num) <$> zip ns [0 .. num - 1] where num = convert (length ns)
-    span    = rect' (2 * rad + 10) off
-    width   = 8
+    span    = rect (2 * rad + 10) off
+    width   = portWidth
     rad     = 50
     off     = 4
+
+normalNode :: [String] -> [String] -> Geo
+normalNode ins outs = fill "rgba(255,255,255,0.05)" $ (move 150 200 $ roundedRect 30 30 30 30 300 400) + move 0 30 (ports ins) where
+    portShape = alignTopRight $ rect portWidth gridElemHeight
+    port n    = fill ("rgb(" <> convert (show $ round r) <> "," <> convert (show $ round g) <> "," <> convert (show $ round b) <> ")") $ portShape where
+        Color.RGB r g b _ = Color.lch2rgb $ buildLCH (Color $ hash n)
+    ports ns  = mconcat $ (\(n,i) -> move 0 (i * (gridElemHeight + 4)) $ port n) <$> zip ns [0 .. num - 1] where num = convert (length ns)
 
 arrow :: Point -> Point -> Geo
 arrow p p' = rotateRad (angle p p') $ linkLine len + (move len 0 arrowHead) where
@@ -525,20 +672,16 @@ arrowHead = path [pt 0 headW, pt headL 0, pt 0 (-headW)] where
     headL  = 10
 
 link :: Point -> Point -> Geo
-link p p' = rotateRad (angle p p') $ linkLine len + move (len / 2) 0 arrowHead where 
+link p p' = rotateRad (angle p p') $ linkLine len + move (len / 2) 0 arrowHead where
     len   = dist p p'
 
 linkLine :: Double -> Geo
-linkLine len = move 0 (-aWidth/2) $ rect len aWidth where
+linkLine len = alignLeft $ rect len aWidth where
     aWidth = 4
 
-dist :: Point -> Point -> Double
-dist (Point sx sy) (Point ex ey) = sqrt $ dx * dx + dy * dy where
-    dx = ex - sx
-    dy = ey - sy
 
-angle :: Point -> Point -> Double
-angle (Point sx sy) (Point ex ey) = atan2 (ey - sy) (ex - sx)
+
+
 
 
 -- graph :: Map Int
@@ -555,6 +698,7 @@ data Node = Node { _pos     :: Point
 renderNode :: Node -> Geo
 renderNode (Node pos ins outs pans) = move (pos ^. x) (pos ^. y) $ case pans of
     CompactNode -> compactNode ins outs
+    NormalNode  -> normalNode  ins outs
 
 
 newtype Color = Color { fromColor :: Int } deriving (Eq, Generic, Ord, Show)
@@ -578,8 +722,11 @@ main :: IO ()
 main = do
   let nodes = [ Node (Point 600 600) ["Int", "String", "Vector"] ["Int"] CompactNode
               , Node (Point 800 600) ["Int"] ["Int"] CompactNode
+              , Node (Point 950 500) ["Int", "String", "Vector"] ["Int"] NormalNode
               ]
   let svg = render _w _h
+        --   $ fill "#ff0000" $ mconcat (renderNode <$> nodes)
+        --   $ mconcat [navPanel, move 400 0 graphPanel, vsep 400]
           $ mconcat [navPanel, move 400 0 graphPanel, vsep 400
                     , fill "#ff0000" $ move 650 600 $ link (Point 0 0) (Point 100 0)
                     ] <> mconcat (renderNode <$> nodes)
