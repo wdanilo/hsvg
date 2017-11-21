@@ -178,6 +178,8 @@ makeLenses ''ControlPoint
 instance (a~b, a~Double) => Convertible (a,b) ControlPoint where
   convert = ControlPoint mempty mempty . convert
 
+instance Bounding ControlPoint where
+    bbox (ControlPoint _ _ p) = bbox p
 
 
 pt   ::                     Double -> Double                     -> ControlPoint
@@ -207,26 +209,34 @@ spt x y s = SmoothPoint (Point x y) s
 -- === BBox === --
 ------------------
 
-data BBox = BBox { _topLeft :: Point, _width :: Double, _height :: Double } deriving (Show)
-makeLenses ''BBox
+data BBox = BBox Point Double Double
+          | BBoxNull
+          deriving (Show)
 
 class Bounding a where
     bbox :: a -> BBox
 
 bbcat :: BBox -> BBox -> BBox
-bbcat (BBox (Point x y) w h) (BBox (Point x' y') w' h') = BBox (Point left top) (right - left) (bottom - top) where
-    left   = min x x'
-    top    = min y y'
-    right  = max (x + w) (x' + w')
-    bottom = max (y + h) (y' + h')
+bbcat a b = case (a,b) of
+    (BBoxNull, a) -> a
+    (a, BBoxNull) -> a
+    (BBox (Point x y) w h, BBox (Point x' y') w' h') -> BBox (Point left top) (right - left) (bottom - top) where
+        left   = min x x'
+        top    = min y y'
+        right  = max (x + w) (x' + w')
+        bottom = max (y + h) (y' + h')
 
-instance Mempty BBox where mempty = BBox (Point 0 0) 0 0
+instance Mempty    BBox where mempty = BBoxNull
+instance Semigroup BBox where (<>)   = bbcat
 
 instance Bounding a => Bounding (Boolean a) where
     bbox = \case
         Subtract  a b -> bbcat (bbox a) (bbox b)
         Intersect a b -> bbcat (bbox a) (bbox b)
         Merge     a b -> bbcat (bbox a) (bbox b)
+
+instance Bounding Point where
+    bbox p = BBox p 0 0
 
 
 
@@ -396,9 +406,9 @@ instance Bounding GeoDef where
 instance Bounding Shape where
   bbox = \case
     Rect   w h -> BBox (Point (-w/2) (-h/2)) w h
-    Circle r   -> BBox (Point (-r/2) (-r/2)) r r
-    Arc    r _ -> BBox (Point (-r/2) (-r/2)) r r
-    -- Path   pts -> mconcat $ bbox <$> pts
+    Circle r   -> BBox (Point (-r) (-r)) r r
+    Arc    r _ -> BBox (Point (-r) (-r)) r r
+    Path   pts -> mconcat $ bbox <$> pts
     -- Spath  pts -> mconcat $ bbox <$> pts
 
 
@@ -642,25 +652,60 @@ portWidth :: Double
 portWidth = 6
 
 gridElemHeight :: Double
-gridElemHeight = 40
+gridElemOffset :: Double
+gridElemHeight = 30
+gridElemOffset = 6
 
-compactNode :: [String] -> [String] -> Geo
+typeColor :: Text -> Text
+typeColor s = "rgb(" <> convert (show $ round r) <> "," <> convert (show $ round g) <> "," <> convert (show $ round b) <> ")" where
+    Color.RGB r g b _ = Color.lch2rgb $ buildLCH (Color $ 100 + hash (convert s :: String)) -- FIXME: why we need string conversion here?
+
+compactNode :: [Text] -> [Text] -> Geo
 compactNode ins outs = ports ins + rotate 180 (ports outs) where
     portShape s = rotate (90) $ arc rad (pi / s) - circle (rad - width) - span - rotateRad (-pi / s) span
-    port n s   = fill ("rgb(" <> convert (show $ round r) <> "," <> convert (show $ round g) <> "," <> convert (show $ round b) <> ")") $ portShape s where
-        Color.RGB r g b _ = Color.lch2rgb $ buildLCH (Color $ hash n)
+    port n s   = fill (typeColor n) $ portShape s
     ports ns  = mconcat $ (\(n,i) -> rotate (-i * 180 / num) $ port n num) <$> zip ns [0 .. num - 1] where num = convert (length ns)
     span    = rect (2 * rad + 10) off
     width   = portWidth
     rad     = 50
-    off     = 4
+    off     = gridElemOffset
 
-normalNode :: [String] -> [String] -> Geo
-normalNode ins outs = fill "rgba(255,255,255,0.05)" $ (move 150 200 $ roundedRect 30 30 30 30 300 400) + move 0 30 (ports ins) where
+normalNode :: [Text] -> [Text] -> Geo
+normalNode ins outs = fill "rgba(255,255,255,0.04)" $ (move 150 (height/2) $ roundedRect 18 18 18 18 300 height) + move 0 off (ports ins) where
+    -- portShape = alignTopRight $ rect portWidth gridElemHeight
+    portShape = move (-off) (gridElemHeight/2) $ alignRight arrowHead
+    port n    = fill (typeColor n) $ move off 0 widget + portShape where
+        widget = fromJust mempty $ Map.lookup n widgets
+    ports ns  = mconcat $ (\(n,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n) <$> zip ns [0 .. num - 1] where num = convert (length ns)
+    height    = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) - gridElemOffset + 2 * off
+    off       = 10
+    -- slider    = fill "rgba(255,255,255,0.04)" $ move 10 0 $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) 280 gridElemHeight
+    -- slider    = fill "rgba(255,255,255,0.04)" $ alignTopLeft $ roundedRect 0 20 20 0 290 40
+
+normalNode2 :: [Text] -> [Text] -> Geo
+normalNode2 ins outs = fill "rgba(255,255,255,0.04)" $ (move 150 (height/2) $ roundedRect 30 30 30 30 300 height) + move 0 30 (ports ins) where
     portShape = alignTopRight $ rect portWidth gridElemHeight
-    port n    = fill ("rgb(" <> convert (show $ round r) <> "," <> convert (show $ round g) <> "," <> convert (show $ round b) <> ")") $ portShape where
-        Color.RGB r g b _ = Color.lch2rgb $ buildLCH (Color $ hash n)
-    ports ns  = mconcat $ (\(n,i) -> move 0 (i * (gridElemHeight + 4)) $ port n) <$> zip ns [0 .. num - 1] where num = convert (length ns)
+    port n    = fill (typeColor n) $ portShape + move 10 0 (slider 280 0.3) where
+        widget = fromJust mempty $ Map.lookup n widgets
+    ports ns  = mconcat $ (\(n,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n) <$> zip ns [0 .. num - 1] where num = convert (length ns)
+    height    = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) + 2 * 30
+
+slider :: Double -> Double -> Geo
+slider width p = body + val where
+    val  = fill "rgba(255,255,255,0.06)" $ alignTopLeft $ roundedRect (gridElemHeight/2) 0 0 (gridElemHeight/2) (width * p) gridElemHeight
+    body = fill "rgba(255,255,255,0.04)" $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
+
+toggle :: Bool -> Geo
+toggle t = body + val where
+    val   = fill "rgba(255,255,255,0.06)" $ alignTopLeft $ move off off $ circle (gridElemHeight/2 - off)
+    body  = fill "rgba(255,255,255,0.04)" $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
+    width = gridElemHeight * 2
+    off   = 6
+
+widgets :: Map Text Geo
+widgets = Map.insert "Int"  (slider 280 0.3)
+        $ Map.insert "Bool" (toggle True)
+        $ mempty
 
 arrow :: Point -> Point -> Geo
 arrow p p' = rotateRad (angle p p') $ linkLine len + (move len 0 arrowHead) where
@@ -690,8 +735,8 @@ linkLine len = alignLeft $ rect len aWidth where
 data NodeType = CompactNode | NormalNode deriving (Show)
 
 data Node = Node { _pos     :: Point
-                 , _inputs  :: [String]
-                 , _outputs :: [String]
+                 , _inputs  :: [Text]
+                 , _outputs :: [Text]
                  , _panels  :: NodeType
                  }
 
@@ -722,7 +767,7 @@ main :: IO ()
 main = do
   let nodes = [ Node (Point 600 600) ["Int", "String", "Vector"] ["Int"] CompactNode
               , Node (Point 800 600) ["Int"] ["Int"] CompactNode
-              , Node (Point 950 500) ["Int", "String", "Vector"] ["Int"] NormalNode
+              , Node (Point 950 550) ["Int", "Int", "Bool"] ["Int"] NormalNode
               ]
   let svg = render _w _h
         --   $ fill "#ff0000" $ mconcat (renderNode <$> nodes)
