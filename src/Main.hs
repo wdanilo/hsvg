@@ -674,7 +674,7 @@ normalNode :: [Text] -> [Text] -> Geo
 normalNode ins outs = fill "rgba(255,255,255,0.04)" $ (move 150 (height/2) $ roundedRect 18 18 18 18 300 height) + move 0 off (ports ins) where
     -- portShape = alignTopRight $ rect portWidth gridElemHeight
     portShape = move (-off) (gridElemHeight/2) $ alignRight arrowHead
-    port n    = fill (typeColor n) $ move off 0 widget + portShape where
+    port n    = fill (typeColor n) portShape + move off 0 widget where
         widget = fromJust mempty $ Map.lookup n widgets
     ports ns  = mconcat $ (\(n,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n) <$> zip ns [0 .. num - 1] where num = convert (length ns)
     height    = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) - gridElemOffset + 2 * off
@@ -685,22 +685,26 @@ normalNode ins outs = fill "rgba(255,255,255,0.04)" $ (move 150 (height/2) $ rou
 normalNode2 :: [Text] -> [Text] -> Geo
 normalNode2 ins outs = fill "rgba(255,255,255,0.04)" $ (move 150 (height/2) $ roundedRect 30 30 30 30 300 height) + move 0 30 (ports ins) where
     portShape = alignTopRight $ rect portWidth gridElemHeight
-    port n    = fill (typeColor n) $ portShape + move 10 0 (slider 280 0.3) where
+    port n    = fill (typeColor n) portShape + move 10 0 (slider 280 0.3) where
         widget = fromJust mempty $ Map.lookup n widgets
     ports ns  = mconcat $ (\(n,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n) <$> zip ns [0 .. num - 1] where num = convert (length ns)
     height    = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) + 2 * 30
 
 slider :: Double -> Double -> Geo
 slider width p = body + val where
-    val  = fill "rgba(255,255,255,0.06)" $ alignTopLeft $ roundedRect (gridElemHeight/2) 0 0 (gridElemHeight/2) (width * p) gridElemHeight
-    body = fill "rgba(255,255,255,0.04)" $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
+    val  = fill layerVal $ alignTopLeft $ roundedRect (gridElemHeight/2) 0 0 (gridElemHeight/2) (width * p) gridElemHeight
+    body = fill layerBg  $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
+    -- body = fill "rgba(0,0,0,0)" $ strokeColor bgColor $ strokeWidth 4 $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
 
 toggle :: Bool -> Geo
 toggle t = body + val where
-    val   = fill "rgba(255,255,255,0.06)" $ alignTopLeft $ move off off $ circle (gridElemHeight/2 - off)
-    body  = fill "rgba(255,255,255,0.04)" $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
+    val   = fill layerVal $ alignTopLeft $ move off off $ circle (gridElemHeight/2 - off)
+    body  = fill layerBg  $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
     width = gridElemHeight * 2
     off   = 6
+
+layerBg  = "rgba(255,255,255,0.06)"
+layerVal = "rgba(255,255,255,0.06)"
 
 widgets :: Map Text Geo
 widgets = Map.insert "Int"  (slider 280 0.3)
@@ -769,7 +773,9 @@ main = do
               , Node (Point 800 600) ["Int"] ["Int"] CompactNode
               , Node (Point 950 550) ["Int", "Int", "Bool"] ["Int"] NormalNode
               ]
+
   let svg = render _w _h
+        --   $ strokeWidth 4 $ strokeColor "#ff0000" $ rect 100 100
         --   $ fill "#ff0000" $ mconcat (renderNode <$> nodes)
         --   $ mconcat [navPanel, move 400 0 graphPanel, vsep 400]
           $ mconcat [navPanel, move 400 0 graphPanel, vsep 400
