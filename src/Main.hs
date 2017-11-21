@@ -648,7 +648,8 @@ baseColor3 = "rgb(180,180,180)"
 
 duplicate i x y s = mconcat $ (\j -> move (j*x) (j*y) s) <$> [0..i]
 
-bgColor = "#141210"
+-- bgColor = "#141210"
+bgColor = "#201E1A"
 
 databaseIcon :: Geo
 databaseIcon = seg baseColor 10 0 + move 0 32 (seg baseColor2 0 0) + move 0 64 (seg baseColor3 0 10) where
@@ -661,7 +662,10 @@ databaseIcon = seg baseColor 10 0 + move 0 32 (seg baseColor2 0 0) + move 0 64 (
   front        = move 18 15 (fill bgColor ball)
                + move 50 10 (fill bgColor dots)
 
-panelColor = "#161514"
+-- panelColor = "#161514"
+-- panelColor = "#201E1A"
+panelColor = "hsl(40,8%,9%)"
+
 tabHeight = 60
 
 -- 2880 x 1600
@@ -709,25 +713,32 @@ compactNode ins outs = ports ins + rotate 180 (ports outs) where
     rad     = 30
     off     = gridElemOffset
 
-compactNode2 :: [Port] -> [Port] -> Geo
-compactNode2 ins outs = body + ports True ins + ports False outs where
-    body = fill "rgba(255,255,255,0.1)" $ circle rad - circle (rad - 6) + fill (typeColor "Int") (circle (rad - 10))
-    phead b     = if b then inPortHead else outPortHead
-    poff  b     = (if b then (0-) else id) $ rad + off
-    port  b n t = fill (typeColor t) $ move (poff b) 0 (phead b + if b then move loff 4 (portInLabelBase n) else mempty) where
-        loff = (off+12) * if b then (-1) else 1
-    ports b ps  = rotate rootAngle $ mconcat $ (\(Port n t _,i) -> rotate (-i * baseAngle) $ port b n t) <$> zip ps [0 .. num - 1] where
+circleShadow :: Int -> Int -> Geo
+circleShadow small big = mconcat $ (fill "rgba(0,0,0,0.02)" . circle . convert) <$> reverse [small .. big]
+--
+compactNode2 :: Maybe BasePort -> [Port] -> [Port] -> Geo
+compactNode2 base ins outs = body + inPorts + outPorts + nextPort where
+    inPorts       = ports True  ins
+    outPorts      = ports False outs
+    body          = fill refcolor (circle rad) + (circleShadow (round $ rad - 10) (round $ rad - 6) - circle (rad - 10)) + fill selfColor (circle (rad - 10))
+    inArrow       = move (-roff) 0 inPortHead * circle 40
+    outArrow      = move roff 0 outPortHead
+    outPortShape  = outArrow - circle roff
+    inPortShape n = inArrow + move (-roff) 0 (move (-off - 14) 5 (portInLabelBase n))
+    port  b n t   = fill (typeColor t) $ if b then inPortShape n else outPortShape
+    ports b ps    = rotate rootAngle $ mconcat $ (\(Port n t _,i) -> rotate (-i * baseAngle) $ port b n t) <$> zip ps [0 .. num - 1] where
         num       = convert (length ps)
-        baseAngle = 150 / num
+        baseAngle = 180 / (num + 1)
         rootAngle = (num - 1) * baseAngle / 2
+    nextPort      = fill "rgba(255,255,255,0.08)" $ rotate (-90) $ inPortShape ""
+    (selfColor, refcolor) = case base of
+        Nothing           -> ("rgba(255,255,255,0.2)","rgba(255,255,255,0.08)")
+        Just (SelfPort t) -> (typeColor "Int", "rgba(255,255,255,0.1)")
+        Just (RefPort  t) -> ("rgba(255,255,255,0.1)", typeColor "Int")
 
-    -- portShape s = rotate (90) $ arc rad (pi / s) - circle (rad - width) - span - rotateRad (-pi / s) span
-    -- port n s   = fill (typeColor n) $ portShape s
-    -- ports ps  = mconcat $ (\(Port _ t _,i) -> rotate (-i * 180 / num) $ port t num) <$> zip ps [0 .. num - 1] where num = convert (length ps)
-    -- span    = rect (2 * rad + 10) off
-    -- width   = portWidth
     rad     = 20
     off     = gridElemOffset + 2
+    roff    = rad + off
 
 label :: Text -> Geo
 label = fill "rgba(255,255,255,0.3)" . textAnchorEnd . fontWeight 600 . fontSize 17 . fontFamily "Helvetica Neue" . text
@@ -742,7 +753,7 @@ portLabelBase :: Bool -> Text -> Geo
 portLabelBase b = if b then portInLabelBase else portOutLabelBase
 
 portLabelBase' :: Text -> Geo
-portLabelBase' = fontWeight 600 . fontSize 17 . fontFamily "Helvetica Neue" . text
+portLabelBase' = fontWeight 800 . fontSize 17 . fontFamily "Helvetica Neue" . text
 
 normalNode :: [Port] -> [Port] -> Geo
 normalNode ins outs = fill "rgba(255,255,255,0.04)" $ (move 150 (height/2) $ roundedRect 18 18 18 18 300 height) + move 0 off (ports ins) where
@@ -794,10 +805,15 @@ arrowHead = path [pt 0 headW, pt headL 0, pt 0 (-headW)] where
     headW  = 8
     headL  = 10
 
+arrowHead2 :: Geo
+arrowHead2 = path [pt 0 headW, pt headL 0, pt 0 (-headW)] where
+    headW  = 10
+    headL  = 14
+
 
 inPortHead, outPortHead :: Geo
-inPortHead  = move (-10) 0 arrowHead
-outPortHead = arrowHead
+inPortHead  = move (-14) 0 arrowHead2
+outPortHead = move (-3) 0 arrowHead2
 
 link :: Point -> Point -> Geo
 link p p' = rotateRad (angle p p') $ linkLine len + move (len / 2) 0 arrowHead where
@@ -822,10 +838,15 @@ data NodeType
   deriving (Show)
 
 data Node = Node { _pos     :: Point
+                 , _base    :: Maybe BasePort
                  , _inputs  :: [Port]
                  , _outputs :: [Port]
                  , _panels  :: NodeType
                  }
+
+data BasePort = SelfPort Text
+              | RefPort  Text
+              deriving (Show)
 
 data Port = Port { _name :: Text
                  , _tp   :: Text
@@ -833,19 +854,19 @@ data Port = Port { _name :: Text
                  }
 
 renderNode :: Node -> Geo
-renderNode (Node pos ins outs pans) = move (pos ^. x) (pos ^. y) $ case pans of
-    CompactNode  -> compactNode ins outs
-    CompactNode2 -> compactNode2 ins outs
-    NormalNode   -> normalNode  ins outs
+renderNode (Node pos base ins outs pans) = move (pos ^. x) (pos ^. y) $ case pans of
+    CompactNode  -> compactNode  ins outs
+    CompactNode2 -> compactNode2 base ins outs
+    NormalNode   -> normalNode   ins outs
 
 
 newtype Color = Color { fromColor :: Int } deriving (Eq, Generic, Ord, Show)
 
 colorC :: Int -> Float
-colorC _ = 45
+colorC _ = 40
 
 colorL :: Int -> Float
-colorL _ = 30
+colorL _ = 35 -- 30
 
 colorH :: Int -> Int
 colorH _ = 100
@@ -858,10 +879,10 @@ buildLCH (Color i) = Color.LCH (colorL i) (colorC i) (convert h') 255 where
 
 main :: IO ()
 main = do
-  let nodes = [ Node (Point 600 600) [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "position" "Vector" ""] [Port "out" "Int" "0"] CompactNode
-              , Node (Point 800 600) [Port "in" "Int" "0"] [Port "out" "Int" "0"] CompactNode
-              , Node (Point 800 800) [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "enabled" "Bool" "True"] [Port "out" "Int" "0"] CompactNode2
-              , Node (Point 950 550) [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "enabled" "Bool" "True"] [Port "out" "Int" "0"] NormalNode
+  let nodes = [ Node (Point 600 600) Nothing [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "position" "Vector" ""] [Port "out" "Int" "0"] CompactNode
+              , Node (Point 800 600) Nothing [Port "in" "Int" "0"] [Port "out" "Int" "0"] CompactNode
+              , Node (Point 800 800) Nothing [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "enabled" "Bool" "True"] [Port "out" "Int" "0"] CompactNode2
+              , Node (Point 950 550) Nothing [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "enabled" "Bool" "True"] [Port "out" "Int" "0"] NormalNode
               ]
 
   let svg = render _w _h
