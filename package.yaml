@@ -18,6 +18,7 @@ dependencies:
     - text
     - matrix
     - hashable
+    - shelly
 
 default-extensions:
     - AllowAmbiguousTypes

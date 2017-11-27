@@ -3,10 +3,10 @@
 module Main where
 
 import Prologue hiding (Simple, subtract, point, duplicate)
-import qualified Data.Map.Strict as Map
-import           Data.Map.Strict (Map)
-import qualified Data.Set        as Set
-import           Data.Set        (Set)
+import qualified "containers" Data.Map.Strict as Map
+import           "containers" Data.Map.Strict (Map)
+import qualified "containers" Data.Set        as Set
+import           "containers" Data.Set        (Set)
 import           Control.Monad.State.Layered
 import qualified Data.Text    as Text
 import qualified Data.Text.IO as Text
@@ -17,6 +17,8 @@ import           Data.Matrix  (Matrix(..))
 import qualified Data.Color as Color
 import           Data.Fixed              (mod')
 import           Data.Hashable (Hashable, hash)
+
+import qualified Shelly as Shelly
 
 -----------------------
 -- === Transform === --
@@ -284,6 +286,7 @@ data Style
   | FontSize    Int
   | FontWeight  Int
   | TextAnchor  TextAnchor
+  | CSS         Text Text
   deriving (Eq, Ord, Show)
 
 data Geo = Geo { _material   :: Material
@@ -351,6 +354,12 @@ textAnchorStart, textAnchorMiddle, textAnchorEnd :: Geo -> Geo
 textAnchorStart  = textAnchor AnchorStart
 textAnchorMiddle = textAnchor AnchorMiddle
 textAnchorEnd    = textAnchor AnchorEnd
+
+css :: Text -> Text -> Geo -> Geo
+css k v = material %~ (CSS k v:)
+
+textVAlignMiddle :: Geo -> Geo
+textVAlignMiddle = css "alignment-baseline" "middle"
 
 fontFamily :: Text -> Geo -> Geo
 fontFamily f = material %~ (FontFamily f:)
@@ -543,6 +552,8 @@ renderStyle = \case
           AnchorStart  -> "start"
           AnchorMiddle -> "middle"
           AnchorEnd    -> "end"
+  CSS         k v -> k <> ":" <> v
+
 
 -- FIXME: we should use XML library here instead of passing "rest" variable containing text that we want to put in the header
 renderGeoDef :: MonadStates '[MaskSet, GeoMap, DefMap] m => Text -> GeoDef -> m Text
@@ -699,10 +710,11 @@ tab w = fill panelColor $ path [pt 0 0, rpt w 0 (w + r) 0, lpt (w + slope - r) t
 portWidth :: Double
 portWidth = 4
 
-gridElemHeight :: Double
+gridElemHeight, gridElemHeight2 :: Double
 gridElemOffset :: Double
-gridElemHeight = 30
-gridElemOffset = 6
+gridElemHeight  = 30
+gridElemHeight2 = gridElemHeight / 2
+gridElemOffset  = 6
 
 typeColor :: Text -> Text
 typeColor s = "rgb(" <> convert (show $ round r) <> "," <> convert (show $ round g) <> "," <> convert (show $ round b) <> ")" where
@@ -734,8 +746,12 @@ compactNodeBg :: Text
 compactNodeBg  = "rgba(255,255,255,0.16)"
 compactNodeBg2 = "rgba(255,255,255,0.06)"
 
+arrowOffset :: Double
+arrowOffset = gridElemOffset + 2
+
 compactNode2 :: Maybe BasePort -> [Port] -> [Port] -> [Mod] -> Geo
-compactNode2 base ins outs mods = selection + body + inPorts + outPorts + nextPort where
+compactNode2 base ins outs mods = selection + body + inPorts + outPorts + nextPort + expr where
+    expr          = move 0 (-rad - 16) $ exprLabel "outArrow"
     inPorts       = ports True  ins
     outPorts      = ports False outs
     body          = fill refcolor (circle rad) + selfPort mt
@@ -743,7 +759,7 @@ compactNode2 base ins outs mods = selection + body + inPorts + outPorts + nextPo
     outArrow      = move roff 0 outPortHead
     outPortShape  = outArrow - circle roff
     inPortShape n = (if Hovered `elem` mods then (+ txt) else id) inArrow where
-        txt = move (-roff) 0 (move (-off - 14) 5 (portInLabelBase n))
+        txt = move arrOff 5 (portInLabelBase n)
     port  b n t   = fill col $ if b then inPortShape n else outPortShape where
         col = if Hovered `elem` mods then typeColor t else compactNodeBg2
     ports b ps    = rotate rootAngle $ mconcat $ (\(Port n t _,i) -> rotate (-i * baseAngle) $ port b n t) <$> zip ps [0 .. num - 1] where
@@ -761,8 +777,8 @@ compactNode2 base ins outs mods = selection + body + inPorts + outPorts + nextPo
     selection     = if Selected `elem` mods then fill "hsla(50, 100%, 60%, 0.2)" $ circle 60 - circle 50 else mempty
 
     rad     = 20
-    off     = gridElemOffset + 2
-    roff    = rad + off
+    roff    = rad + arrowOffset
+    arrOff  = (-rad - arrowOffset*2 - 14)
 
 
 -- === Self port === --
@@ -777,15 +793,23 @@ selfPort mt = circleShadow (round $ selfPortRadius) (round $ selfPortRadius + sh
         Nothing -> "rgba(255,255,255,0.2)"
         Just t  -> typeColor t
 
--- selfPort :: Maybe Text -> Geo
--- selfPort mt = fill panelColor (circle $ selfPortRadius + shadowRad) + fill selfColor (circle selfPortRadius) where
---     shadowRad = 3
---     selfColor = case mt of
---         Nothing -> compactNodeBg
---         Just t  -> typeColor t
 
 label :: Text -> Geo
 label = fill "rgba(255,255,255,0.3)" . textAnchorEnd . fontWeight 600 . fontSize 17 . fontFamily "Helvetica Neue" . text
+
+
+valueLabelBase :: Text -> Geo
+valueLabelBase = textVAlignMiddle . fontWeight 600 . fontSize 17 . fontFamily "Helvetica Neue" . text
+
+valueLabel :: Text -> Geo
+valueLabel = move 0 gridElemHeight2 . fill "rgba(255,255,255,0.4)" . valueLabelBase
+
+valueNumLabel :: Text -> Geo
+valueNumLabel = move 0 1 . valueLabel
+
+
+exprLabel :: Text -> Geo
+exprLabel = fill "rgba(255,255,255,0.3)" . textAnchorMiddle . fontWeight 600 . fontSize 17 . fontFamily "Helvetica Neue" . text
 
 portInLabelBase :: Text -> Geo
 portInLabelBase = textAnchorEnd . portLabelBase'
@@ -799,74 +823,70 @@ portLabelBase b = if b then portInLabelBase else portOutLabelBase
 portLabelBase' :: Text -> Geo
 portLabelBase' = fontWeight 800 . fontSize 17 . fontFamily "Helvetica Neue" . text
 
-normalNode :: [Port] -> [Port] -> [Mod] -> Geo
-normalNode ins outs mods = fill "rgba(255,255,255,0.04)" $ (move 150 (height/2) $ roundedRect 18 18 18 18 300 height) + move 0 off (ports ins) where
-    portShape = move (-off) (gridElemHeight/2) $ alignRight arrowHead
-    port n t   = fill (typeColor t) (portShape + lab) + move off 0 widget where
-        widget = fromJust mempty $ Map.lookup t widgets
-        lab    = if Hovered `elem` mods then move (-2*off - 10) (gridElemHeight/2 + 5) (portInLabelBase n) else mempty
-    ports ps  = mconcat $ (\(Port n t _,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n t) <$> zip ps [0 .. num - 1] where num = convert (length ps)
-    height    = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) - gridElemOffset + 2 * off
-    off       = 10
 
 normalNode2 :: [Port] -> [Port] -> [Mod] -> Geo
-normalNode2 ins outs mods = move (-compactNodeRadius) (-compactNodeRadius) (move 0 (2 * compactNodeRadius) $ body2 + move 0 off ports) + xx + selfPort Nothing where
-    xx         = fill panelColor (circle compactNodeRadius) + opacity 0.06 (fill "white" (circle compactNodeRadius + (move (-compactNodeRadius) 0 $ alignTopLeft $ rect (3*compactNodeRadius) compactNodeRadius) - move (2*compactNodeRadius) 0 (circle compactNodeRadius)))
-    body2      = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 height) where r = compactNodeRadius
-    ports      =  (mkPorts ins)
-    portShape  = move (-off) (gridElemHeight/2) $ alignRight arrowHead
-    port n t   = fill (typeColor t) (portShape + lab) + move off 0 widget where
-        widget = fromJust mempty $ Map.lookup t widgets
-        lab    = if Hovered `elem` mods then move (-2*off - 10) (gridElemHeight/2 + 5) (portInLabelBase n) else mempty
-    mkPorts ps  = mconcat $ (\(Port n t _,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n t) <$> zip ps [0 .. num - 1] where num = convert (length ps)
+normalNode2 ins outs mods = body + header + selfPort Nothing where
+    header     = fill panelColor (circle compactNodeRadius) + opacity 0.06 (fill "white" headerNeck)
+    headerNeck = circle compactNodeRadius
+               + (move (-compactNodeRadius) 0 $ alignTopLeft $ rect (3*compactNodeRadius + bodyOffset) (compactNodeRadius + bodyOffset))
+               - move (2*compactNodeRadius + bodyOffset) 0 (circle $ compactNodeRadius + bodyOffset)
+    body       = move (-compactNodeRadius) (compactNodeRadius + bodyOffset) $ bodyBg + move 0 off ports
+    bodyBg     = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 height) where r = compactNodeRadius
+    ports      = mkPorts ins
+    bodyOffset = arrowOffset
+    portShape  = move (-off) gridElemHeight2 $ alignRight arrowHead
+    port n t (SingleVal v) = fill (typeColor t) (portShape + lab) + move off 0 (widget v) where
+        widget = fromJust (const mempty) $ Map.lookup t widgets
+        lab    = if Hovered `elem` mods then move (-2*off - 10) (gridElemHeight2 + 5) (portInLabelBase n) else mempty
+    mkPorts ps  = mconcat $ (\(Port n t v,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n t v) <$> zip ps [0 .. num - 1] where num = convert (length ps)
     portsHeight = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) - gridElemOffset + 2 * off
-    height    = portsHeight
-    off       = 10
+    height      = portsHeight
+    off         = 10
 
--- normalNode2 :: [Port] -> [Port] -> [Mod] -> Geo
--- normalNode2 ins outs mods = move (-compactNodeRadius) (-compactNodeRadius) (body2 + ports) + xx + selfPort Nothing where
---     bodyTop    = fill compactNodeBg $ (alignTopLeft $ roundedRect r r 0 0 300 (2*compactNodeRadius)) where r = compactNodeRadius
---     bodyBottom = fill "rgba(255,255,255,0.04)" $ (alignTopLeft $ roundedRect 0 0 r r 300 portsHeight) where r = compactNodeRadius
---     body       = bodyTop + move 0 (2*compactNodeRadius) bodyBottom
---     xx         = fill panelColor (circle compactNodeRadius) + fill compactNodeBg (circle compactNodeRadius)
---     body2      = fill "rgba(255,255,255,0.04)" $ (alignTopLeft $ roundedRect r r r r 300 height) where r = compactNodeRadius
---     ports      = move 0 (2 * compactNodeRadius + off) (mkPorts ins)
---     portShape  = move (-off) (gridElemHeight/2) $ alignRight arrowHead
---     port n t   = fill (typeColor t) (portShape + lab) + move off 0 widget where
---         widget = fromJust mempty $ Map.lookup t widgets
---         lab    = if Hovered `elem` mods then move (-2*off - 10) (gridElemHeight/2 + 5) (portInLabelBase n) else mempty
---     mkPorts ps  = mconcat $ (\(Port n t _,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n t) <$> zip ps [0 .. num - 1] where num = convert (length ps)
---     portsHeight = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) - gridElemOffset + 2 * off
---     height    = portsHeight + 2 * compactNodeRadius
---     off       = 10
 
--- normalNode2 :: [Text] -> [Text] -> Geo
--- normalNode2 ins outs = fill "rgba(255,255,255,0.04)" $ (move 150 (height/2) $ roundedRect 30 30 30 30 300 height) + move 0 30 (ports ins) where
---     portShape = alignTopRight $ rect portWidth gridElemHeight
---     port n    = fill (typeColor n) portShape + move 10 0 (slider 280 0.3) where
---         widget = fromJust mempty $ Map.lookup n widgets
---     ports ns  = mconcat $ (\(n,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n) <$> zip ns [0 .. num - 1] where num = convert (length ns)
---     height    = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) + 2 * 30
+extendPlaces :: Double -> Int
+extendPlaces i = if mod' i 1 == 0 then floor i else extendPlaces (10 * i)
 
 slider :: Double -> Double -> Geo
-slider width p = body + val where
-    val  = fill layerVal $ alignTopLeft $ roundedRect (gridElemHeight/2) 0 0 (gridElemHeight/2) (width * p) gridElemHeight
-    body = fill layerBg  $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
-    -- body = fill "rgba(0,0,0,0)" $ strokeColor bgColor $ strokeWidth 4 $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
+slider width s = body + val + txt (show' ipart) (show' fpart) where
+    txt s t = move (width/2) 0
+            $ move (-dotoff) 0 (textAnchorEnd    $ valueNumLabel s)
+            + move   dotoff  0 (textAnchorStart  $ valueNumLabel t)
+            +                  (textAnchorMiddle $ valueNumLabel ".")
+    ipart   = floor s
+    fpart   = extendPlaces (s - fromIntegral ipart)
+    val     = fill layerVal $ alignTopLeft $ roundedRect gridElemHeight2 0 0 gridElemHeight2 (width * p) gridElemHeight
+    body    = fill layerBg  $ alignTopLeft $ roundedRect gridElemHeight2 gridElemHeight2 gridElemHeight2 gridElemHeight2 width gridElemHeight
+    dotoff  = 5
+    p       = s / 10 ^^ (ceiling $ logBase 10 s)
+
 
 toggle :: Bool -> Geo
 toggle t = body + val where
-    val   = fill layerVal $ alignTopLeft $ move off off $ circle (gridElemHeight/2 - off)
-    body  = fill layerBg  $ alignTopLeft $ roundedRect (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) (gridElemHeight/2) width gridElemHeight
+    val   = fill valColor $ alignTopLeft $ move off off $ circle (gridElemHeight2 - off)
+    body  = fill layerBg  $ alignTopLeft $ roundedRect gridElemHeight2 gridElemHeight2 gridElemHeight2 gridElemHeight2 width gridElemHeight
     width = gridElemHeight * 2
     off   = 6
 
-layerBg  = "rgba(255,255,255,0.06)"
-layerVal = "rgba(255,255,255,0.06)"
+textField :: Double -> Text -> Geo
+textField width t = body + txt where
+    txt   = move 8 0 $ valueLabel t
+    body  = fill layerBg  $ alignTopLeft $ roundedRect gridElemHeight2 gridElemHeight2 gridElemHeight2 gridElemHeight2 width gridElemHeight
 
-widgets :: Map Text Geo
-widgets = Map.insert "Int"  (slider 280 0.3)
-        $ Map.insert "Bool" (toggle True)
+
+layerBg  = "rgba(255,255,255,0.06)"
+layerVal = "rgba(255,255,255,0.08)"
+valColor = "rgba(255,255,255,0.14)"
+
+-- widgets :: Map Text Geo
+-- widgets = Map.insert "Int"  (slider 280 0.3)
+--         $ Map.insert "Bool" (toggle True)
+--         $ mempty
+
+widgets :: Map Text (Text -> Geo)
+widgets = Map.insert "Number" (slider 280 . unsafeRead . convert)
+        $ Map.insert "Bool"   (toggle . unsafeRead . convert)
+        $ Map.insert "Text"   (textField 280)
         $ mempty
 
 arrow :: Point -> Point -> Geo
@@ -911,7 +931,6 @@ data Mod
 data NodeType
   = CompactNode
   | CompactNode2
-  | NormalNode
   | NormalNode2
   deriving (Show)
 
@@ -927,16 +946,19 @@ data BasePort = SelfPort Text
               | RefPort  Text
               deriving (Show)
 
+data PortVal
+  = SingleVal Text
+  | MultiVal  [Port]
+
 data Port = Port { _name :: Text
                  , _tp   :: Text
-                 , _val  :: Text
+                 , _val  :: PortVal
                  }
 
 renderNode :: Node -> Geo
 renderNode (Node pos base ins outs pans mods) = move (pos ^. x) (pos ^. y) $ case pans of
     CompactNode  -> compactNode  ins outs
     CompactNode2 -> compactNode2 base ins outs mods
-    NormalNode   -> normalNode        ins outs mods
     NormalNode2  -> normalNode2       ins outs mods
 
 
@@ -954,16 +976,40 @@ colorH _ = 100
 buildLCH :: Color -> Color.LCH
 buildLCH (Color 0) = Color.LCH 50  0 0 255
 buildLCH (Color i) = Color.LCH (colorL i) (colorC i) (convert h') 255 where
-    h'    = (colorH i + (i - 1)) `mod'` 360
+    h'    = 190 + (colorH i + (i * 3 - 1)) `mod'` 360
 
 
 main :: IO ()
 main = do
-  let nodes = [ Node (Point 600 600) Nothing [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "position" "Vector" ""]  [Port "out" "Int" "0"] CompactNode  []
-              , Node (Point 800 600) Nothing [Port "in" "Int" "0"]                                                                [Port "out" "Int" "0"] CompactNode  []
-              , Node (Point 950 550) Nothing [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "enabled" "Bool" "True"] [Port "out" "Int" "0"] NormalNode   []
-              , Node (Point 750 800) Nothing [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "enabled" "Bool" "True"] [Port "out" "Int" "0"] CompactNode2 [Hovered]
-              , Node (Point 950 800) Nothing [Port "blur" "Int" "0.3", Port "name" "String" "name", Port "enabled" "Bool" "True"] [Port "out" "Int" "0"] NormalNode2  [Hovered]
+  let nodes = [ Node (Point 600 600) Nothing
+                    [ Port "blur"     "Number" (SingleVal "0.3")
+                    , Port "name"     "Text"   (SingleVal "name")
+                    , Port "position" "Vector" (SingleVal "")
+                    ]
+                    [ Port "out" "Number" (SingleVal "0")]
+                    CompactNode  []
+              , Node (Point 800 600) Nothing
+                    [ Port "in" "Number"  (SingleVal "0") ]
+                    [ Port "out" "Number" (SingleVal "0") ]
+                    CompactNode  []
+              , Node (Point 750 800) Nothing
+                    [ Port "blur"    "Number" (SingleVal "0.3")
+                    , Port "name"    "Text"   (SingleVal "name")
+                    , Port "enabled" "Bool"   (SingleVal "True")
+                    ]
+                    [ Port "out" "Number" (SingleVal "0")]
+                    CompactNode2 [Hovered]
+              , Node (Point 750 1000) Nothing
+                    []
+                    [ Port "out" "Number" (SingleVal "0")]
+                    CompactNode2 [Hovered]
+              , Node (Point 950 800) Nothing
+                    [ Port "blur"     "Number" (SingleVal "0.7")
+                    , Port "name"     "Text"   (SingleVal "name")
+                    , Port "enabled"  "Bool"   (SingleVal "True")
+                    , Port "position" "Vector" (SingleVal "x") ]
+                    [ Port "out"      "Int"    (SingleVal "0") ]
+                    NormalNode2  [Hovered]
               ]
 
   let svg = render _w _h
@@ -972,13 +1018,14 @@ main = do
         --   $ mconcat [navPanel, move 400 0 graphPanel, vsep 400]
           $ mconcat [navPanel, move 400 0 graphPanel, vsep 400
                     , move 630 600 $ fill (typeColor "Int") $ link (Point 0 0) (Point 140 0)
-                    ] <> mconcat (renderNode <$> nodes) <> (fontFamily "Inconsolata" $ fontSize 40 $ textAnchorMiddle $ fill "#ff0000" $ move 10 10 $ text "hello")
+                    ] <> mconcat (renderNode <$> nodes)
         --   $ opacity 0.2 $ fill "rgb(255,255,255)" (circle 50 + rect 30 100)
   print $ Color.lch2rgb $ buildLCH (Color 7)
   print svg
   Text.writeFile "/tmp/test.svg"  svg
   Text.writeFile "/tmp/test.html" (mkView svg)
-  print "hello"
+  Shelly.shelly $ Shelly.run "google-chrome-stable" ["/tmp/test.html"]
+  return ()
 
 
 mkView s = "<!DOCTYPE html>"
