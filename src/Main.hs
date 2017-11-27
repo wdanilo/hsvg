@@ -724,7 +724,7 @@ compactNode :: [Port] -> [Port] -> Geo
 compactNode ins outs = ports ins + rotate 180 (ports outs) where
     portShape s = rotate (90) $ arc rad (pi / s) - circle (rad - width) - span - rotateRad (-pi / s) span
     port n s   = fill (typeColor n) $ portShape s
-    ports ps  = mconcat $ (\(Port _ t _,i) -> rotate (-i * 180 / num) $ port t num) <$> zip ps [0 .. num - 1] where num = convert (length ps)
+    ports ps  = mconcat $ (\(Port _ t _ _,i) -> rotate (-i * 180 / num) $ port t num) <$> zip ps [0 .. num - 1] where num = convert (length ps)
     span    = rect (2 * rad + 10) off
     width   = portWidth
     rad     = 30
@@ -762,7 +762,7 @@ compactNode2 base ins outs mods = selection + body + inPorts + outPorts + nextPo
         txt = move arrOff 5 (portInLabelBase n)
     port  b n t   = fill col $ if b then inPortShape n else outPortShape where
         col = if Hovered `elem` mods then typeColor t else compactNodeBg2
-    ports b ps    = rotate rootAngle $ mconcat $ (\(Port n t _,i) -> rotate (-i * baseAngle) $ port b n t) <$> zip ps [0 .. num - 1] where
+    ports b ps    = rotate rootAngle $ mconcat $ (\(Port n t _ _,i) -> rotate (-i * baseAngle) $ port b n t) <$> zip ps [0 .. num - 1] where
         num       = convert (length ps)
         baseAngle = 180 / (num + 1)
         rootAngle = (num - 1) * baseAngle / 2
@@ -824,23 +824,24 @@ portLabelBase' :: Text -> Geo
 portLabelBase' = fontWeight 800 . fontSize 17 . fontFamily "Helvetica Neue" . text
 
 
-normalNode2 :: [Port] -> [Port] -> [Mod] -> Geo
-normalNode2 ins outs mods = body + header + selfPort Nothing where
+normalNode :: [Port] -> [Port] -> [Mod] -> Geo
+normalNode ins outs mods = body + header + selfPort Nothing where
     header     = fill panelColor (circle compactNodeRadius) + opacity 0.06 (fill "white" headerNeck)
     headerNeck = circle compactNodeRadius
                + (move (-compactNodeRadius) 0 $ alignTopLeft $ rect (3*compactNodeRadius + bodyOffset) (compactNodeRadius + bodyOffset))
                - move (2*compactNodeRadius + bodyOffset) 0 (circle $ compactNodeRadius + bodyOffset)
     body       = move (-compactNodeRadius) (compactNodeRadius + bodyOffset) $ bodyBg + move 0 off ports
-    bodyBg     = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 height) where r = compactNodeRadius
+    bodyBg     = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 portsHeight) where r = compactNodeRadius
     ports      = mkPorts ins
     bodyOffset = arrowOffset
     portShape  = move (-off) gridElemHeight2 $ alignRight arrowHead
-    port n t (SingleVal v) = fill (typeColor t) (portShape + lab) + move off 0 (widget v) where
+    port n t v = fill (typeColor t) (portShape + lab) + move off 0 (widget v) where
         widget = fromJust (const mempty) $ Map.lookup t widgets
         lab    = if Hovered `elem` mods then move (-2*off - 10) (gridElemHeight2 + 5) (portInLabelBase n) else mempty
-    mkPorts ps  = mconcat $ (\(Port n t v,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) $ port n t v) <$> zip ps [0 .. num - 1] where num = convert (length ps)
-    portsHeight = convert (max (length ins) (length outs)) * (gridElemHeight + gridElemOffset) - gridElemOffset + 2 * off
-    height      = portsHeight
+    mkPorts        ps = mconcat $ (\(p,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) p) <$> zip (prepVPorts 0 ps) [0 ..]
+    prepVPorts ind ps              = mconcat $ prepVPort ind <$> ps
+    prepVPort  ind (Port n t v ps) = move (20*ind) 0 (port n t v) : prepVPorts (succ ind) ps
+    portsHeight = max (height ins) (height outs) + 2 * off
     off         = 10
 
 
@@ -918,8 +919,9 @@ linkLine len = alignLeft $ rect len aWidth where
 
 
 
-
-
+class Measurable a where
+    height :: a -> Double
+    width  :: a -> Double
 
 -- graph :: Map Int
 
@@ -946,20 +948,23 @@ data BasePort = SelfPort Text
               | RefPort  Text
               deriving (Show)
 
-data PortVal
-  = SingleVal Text
-  | MultiVal  [Port]
 
-data Port = Port { _name :: Text
-                 , _tp   :: Text
-                 , _val  :: PortVal
+data Port = Port { _name     :: Text
+                 , _tp       :: Text
+                 , _val      :: Text
+                 , _subPorts :: [Port]
                  }
+
+instance Measurable [Port] where
+    height ps = portNum * gridElemHeight + (max 0 $ portNum - 1) * gridElemOffset where
+        portNum = sum $ countPorts <$> ps
+        countPorts (Port _ _ _ ps) = 1 + sum (countPorts <$> ps)
 
 renderNode :: Node -> Geo
 renderNode (Node pos base ins outs pans mods) = move (pos ^. x) (pos ^. y) $ case pans of
     CompactNode  -> compactNode  ins outs
     CompactNode2 -> compactNode2 base ins outs mods
-    NormalNode2  -> normalNode2       ins outs mods
+    NormalNode2  -> normalNode       ins outs mods
 
 
 newtype Color = Color { fromColor :: Int } deriving (Eq, Generic, Ord, Show)
@@ -982,33 +987,33 @@ buildLCH (Color i) = Color.LCH (colorL i) (colorC i) (convert h') 255 where
 main :: IO ()
 main = do
   let nodes = [ Node (Point 600 600) Nothing
-                    [ Port "blur"     "Number" (SingleVal "0.3")
-                    , Port "name"     "Text"   (SingleVal "name")
-                    , Port "position" "Vector" (SingleVal "")
+                    [ Port "blur"     "Number" "0.3"  []
+                    , Port "name"     "Text"   "name" []
+                    , Port "position" "Vector" ""     []
                     ]
-                    [ Port "out" "Number" (SingleVal "0")]
+                    [ Port "out" "Number" "0" [] ]
                     CompactNode  []
               , Node (Point 800 600) Nothing
-                    [ Port "in" "Number"  (SingleVal "0") ]
-                    [ Port "out" "Number" (SingleVal "0") ]
+                    [ Port "in" "Number"  "0" [] ]
+                    [ Port "out" "Number" "0" [] ]
                     CompactNode  []
               , Node (Point 750 800) Nothing
-                    [ Port "blur"    "Number" (SingleVal "0.3")
-                    , Port "name"    "Text"   (SingleVal "name")
-                    , Port "enabled" "Bool"   (SingleVal "True")
+                    [ Port "blur"    "Number" "0.3"  []
+                    , Port "name"    "Text"   "name" []
+                    , Port "enabled" "Bool"   "True" []
                     ]
-                    [ Port "out" "Number" (SingleVal "0")]
+                    [ Port "out" "Number" "0" [] ]
                     CompactNode2 [Hovered]
               , Node (Point 750 1000) Nothing
                     []
-                    [ Port "out" "Number" (SingleVal "0")]
+                    [ Port "out" "Number" "0" [] ]
                     CompactNode2 [Hovered]
               , Node (Point 950 800) Nothing
-                    [ Port "blur"     "Number" (SingleVal "0.7")
-                    , Port "name"     "Text"   (SingleVal "name")
-                    , Port "enabled"  "Bool"   (SingleVal "True")
-                    , Port "position" "Vector" (SingleVal "x") ]
-                    [ Port "out"      "Int"    (SingleVal "0") ]
+                    [ Port "blur"     "Number" "0.7"  []
+                    , Port "name"     "Text"   "name" []
+                    , Port "enabled"  "Bool"   "True" []
+                    , Port "position" "Vector" "x" [Port "name"     "Text"   "name" []] ]
+                    [ Port "out"      "Int"    "0" [] ]
                     NormalNode2  [Hovered]
               ]
 
