@@ -873,93 +873,100 @@ labelBase = textVAlignMiddle . fontSize 17 . fontFamily "Helvetica Neue" . text
 --     off         = 10
 
 --
+
+data NeighborLine
+    = First
+    | Middle
+    | Last
+    | Only
+    deriving (Show, Eq)
+
+data OrientationLine
+    = Vertical
+    | Horizontal
+    deriving (Show, Eq)
+
+setNeighborLine = \case
+    []     -> []
+    [a]    -> [(Only,a)]
+    (a:as) -> (First,a) : setNeighborLine' as
+setNeighborLine' = \case
+    []     -> []
+    [a]    -> [(Last, a)]
+    (a:as) -> (Middle, a) : setNeighborLine' as
+
 normalNode :: [Port] -> [Port] -> [Mod] -> Geo
 normalNode ins outs mods = body + header + selfPort Nothing where
-    header     = fill panelColor (circle compactNodeRadius) + opacity 0.06 (fill "white" headerNeck)
-    headerNeck = circle compactNodeRadius
-               + (move (-compactNodeRadius) 0 $ alignTopLeft $ rect (3*compactNodeRadius + bodyOffset) (compactNodeRadius + bodyOffset))
-               - move (2*compactNodeRadius + bodyOffset) 0 (circle $ compactNodeRadius + bodyOffset)
-    body       = move (-compactNodeRadius) (compactNodeRadius + bodyOffset) $ bodyBg + move 0 off ports
-    bodyBg     = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 portsHeight) where r = compactNodeRadius
-    ports      = mkPorts ins
-    bodyOffset = arrowOffset
-    port n t v ps = fill (typeColor t) (portShape + lab) where
-        lab       = if Hovered `elem` mods then move (-2*off - 10) gridElemHeight2 (portInLabelBase n) else mempty
-        portShape = move (-off) gridElemHeight2 $ alignRight $ ss
-        ss = if null ps then arrowHead else rotate 90 arrowHead + (alignTop $ rect 2 116)
-    port2 n t v ps = if null ps then move off 0 (widget v) else xx where
-        widget = fromJust (const mempty) $ Map.lookup t widgets
-        xx     = mempty -- move 150 gridElemHeight2
-            --    $ fill "rgba(255,255,255,0.2)" . textAnchorMiddle . fontWeight 800 . labelBase $ "position"
+    header        = fill panelColor (circle compactNodeRadius) + opacity 0.06 (fill "white" headerNeck)
+    headerNeck    = circle compactNodeRadius
+                  + (move (-compactNodeRadius) 0 $ alignTopLeft $ rect (3*compactNodeRadius + bodyOffset) (compactNodeRadius + bodyOffset))
+                  - move (2*compactNodeRadius + bodyOffset) 0 (circle $ compactNodeRadius + bodyOffset)
+    body          = move (-compactNodeRadius) (compactNodeRadius + bodyOffset) $ bodyBg + move 0 off inPorts
+    bodyBg        = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 bodyHeight) where r = compactNodeRadius
+    inPorts       = inPortsDesc
+    (inPortsDesc, inPortsHeight) = mkPortsGeo ins
+    bodyOffset    = arrowOffset
 
-    mkPorts        ps = mconcat $ (\(p,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) p) <$> zip (prepVPorts 0 ps) [0 ..]
-    prepVPorts ind ps              = mconcat $ prepVPort ind <$> ps
-    prepVPort  ind (Port n t v ps) = move (-(6+off)*ind) 0 (port n t v ps) + port2 n t v ps : prepVPorts (succ ind) ps
-    portsHeight = max (height ins) (height outs) + 2 * off
+
+    mkPortsGeo                      = mkPortsGeo' 0
+    mkPortsGeo' ind ps              = vcat2 0 mempty $ mkPortGeo' ind <$> setNeighborLine ps
+    mkPortGeo'  ind (nl, Port n t v ps) = (port + body + move 0 portHeight subGeo, portHeight + subH) where
+        portHeight     = gridElemHeight + gridElemOffset
+        (subGeo, subH) = mkPortsGeo' (succ ind) ps
+        port           = move (-(6+off)*ind) 0 (fill (typeColor t) (portShape + lab))
+        lab            = if Hovered `elem` mods then move (-2*off - 10) gridElemHeight2 (portInLabelBase n) else mempty
+        portShape      = move (-off) gridElemHeight2 $ alignRight ss
+        ss             = if null ps then arrowHead else rotate 90 arrowHead + (alignTop $ rect 2 psHeight)
+        body           = if null ps then move off 0 (widget v Vertical nl) else mempty
+        widget         = fromJust (\_ _ _ -> mempty) $ Map.lookup t widgets
+        psHeight       = subH + gridElemHeight2
+    vcat :: Double -> [(Geo, Double)] -> Geo
+    vcat s [] = mempty
+    vcat s ((p,d):ps) = move 0 s p + vcat (s + d) ps
+
+    vcat2 :: Double -> Geo -> [(Geo, Double)] -> (Geo, Double)
+    vcat2 s g [] = (g,s)
+    vcat2 s g ((p,d):ps) = vcat2 (s+d) (g + move 0 s p) ps
+
+
+    bodyHeight = max inPortsHeight 0 + 2 * off
+
     off         = 10
 
-normalNodey :: [Port] -> [Port] -> [Mod] -> Geo
-normalNodey ins outs mods = body + header + selfPort Nothing where
-    header     = fill panelColor (circle compactNodeRadius) + opacity 0.06 (fill "white" headerNeck)
-    headerNeck = circle compactNodeRadius
-               + (move (-compactNodeRadius) 0 $ alignTopLeft $ rect (3*compactNodeRadius + bodyOffset) (compactNodeRadius + bodyOffset))
-               - move (2*compactNodeRadius + bodyOffset) 0 (circle $ compactNodeRadius + bodyOffset)
-    body       = move (-compactNodeRadius) (compactNodeRadius + bodyOffset) $ bodyBg + move 0 off ports
-    bodyBg     = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 portsHeight) where r = compactNodeRadius
-    ports      = mkPorts ins
-    bodyOffset = arrowOffset
-    port n t v ps = fill (typeColor t) (portShape + lab) where
-        lab       = if Hovered `elem` mods then move (-2*off - 10) (gridElemHeight2 + 5) (portInLabelBase n) else mempty
-        portShape = move (-off) gridElemHeight2 $ alignRight $ ss
-        ss = if null ps then arrowHead else rotate 90 arrowHead + (alignTop $ rect 2 116)
-    port2 n t v ps = move off 0 (widget v) where
-        widget = fromJust (const mempty) $ Map.lookup t widgets
+    portsHeight ps = sum (snd <$> ps) + max 0 (convert $ length ps) * gridElemOffset + gridElemHeight2
 
-    mkPorts        ps = mconcat $ (\(p,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) p) <$> zip (prepVPorts 0 ps) [0 ..]
-    prepVPorts ind ps              = mconcat $ prepVPort ind <$> ps
-    prepVPort  ind (Port n t v ps) = move (-(6+off)*ind) 0 (port n t v ps) + port2 n t v ps : prepVPorts (succ ind) ps
-    portsHeight = max (height ins) (height outs) + 2 * off
-    off         = 10
-
-normalNodex :: [Port] -> [Port] -> [Mod] -> Geo
-normalNodex ins outs mods = body + header + selfPort Nothing where
-    header     = fill panelColor (circle compactNodeRadius) + opacity 0.06 (fill "white" headerNeck)
-    headerNeck = circle compactNodeRadius
-               + (move (-compactNodeRadius) 0 $ alignTopLeft $ rect (3*compactNodeRadius + bodyOffset) (compactNodeRadius + bodyOffset))
-               - move (2*compactNodeRadius + bodyOffset) 0 (circle $ compactNodeRadius + bodyOffset)
-    body       = move (-compactNodeRadius) (compactNodeRadius + bodyOffset) $ bodyBg + move 0 off ports
-    bodyBg     = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 portsHeight) where r = compactNodeRadius
-    ports      = mkPorts ins
-    bodyOffset = arrowOffset
-    portShape  = move (-off) gridElemHeight2 $ alignRight arrowHead
-    port n t v = fill (typeColor t) (portShape + lab) + move off 0 (widget v) where
-        widget = fromJust (const mempty) $ Map.lookup t widgets
-        lab    = if Hovered `elem` mods then move (-2*off - 10) (gridElemHeight2 + 5) (portInLabelBase n) else mempty
-    mkPorts        ps = mconcat $ (\(p,i) -> move 0 (i * (gridElemHeight + gridElemOffset)) p) <$> zip (prepVPorts 0 ps) [0 ..]
-    prepVPorts ind ps              = mconcat $ prepVPort ind <$> ps
-    prepVPort  ind (Port n t v ps) = move (20*ind) 0 (port n t v) : prepVPorts (succ ind) ps
-    portsHeight = max (height ins) (height outs) + 2 * off
-    off         = 10
 
 
 extendPlaces :: Double -> Int
 extendPlaces i = if mod' i 1 == 0 then floor i else extendPlaces (10 * i)
 
 slider :: Double -> Double -> Geo
-slider = sliderBase False False
+slider = sliderBase (Neighbor False False False False)
 
-sliderBase :: Bool -> Bool -> Double -> Double -> Geo
-sliderBase ljoin rjoin width s = body + val + txt (show' ipart) (show' fpart) where
+slider2 :: Double -> Double -> OrientationLine -> NeighborLine -> Geo
+slider2 w s ol nl = sliderBase n w s where
+    n = case (ol,nl) of
+        (Vertical, Only)   -> Neighbor False False False False
+        (Vertical, First)  -> Neighbor False False False True
+        (Vertical, Last)   -> Neighbor False False True  False
+        (Vertical, Middle) -> Neighbor False False True  True
+
+sliderBase :: Neighbor -> Double -> Double -> Geo
+sliderBase (Neighbor l r t b) width s = body + val + txt (show' ipart) (show' fpart) where
     txt s t = move (width/2) 0
             $ move (-dotoff) 0 (textAnchorEnd    $ valueNumLabel s)
             + move   dotoff  0 (textAnchorStart  $ valueNumLabel t)
             +                  (textAnchorMiddle $ valueNumLabel ".")
     ipart   = floor s
     fpart   = extendPlaces (s - fromIntegral ipart)
-    val     = fill layerVal $ alignTopLeft $ roundedRect lround 0 0 lround (width * p) gridElemHeight
-    body    = fill layerBg  $ alignTopLeft $ roundedRect lround rround rround lround width gridElemHeight
-    lround  = if ljoin then 0 else gridElemHeight2
-    rround  = if rjoin then 0 else gridElemHeight2
+    val     = fill layerVal valGeo
+    body    = fill layerBg  bodyGeo
+    bodyGeo = alignTopLeft $ roundedRect clt crt crb clb width gridElemHeight
+    valGeo  = alignTopLeft (rect (width * p) gridElemHeight) * bodyGeo
+    clt     = if l || t then 0 else gridElemHeight2
+    crt     = if r || t then 0 else gridElemHeight2
+    clb     = if l || b then 0 else gridElemHeight2
+    crb     = if r || b then 0 else gridElemHeight2
     dotoff  = 5
     p       = s / 10 ^^ (ceiling $ logBase 10 s)
 
@@ -973,11 +980,11 @@ vectorWidget width vals = sliders' where
     mkSliders = \case
         []     -> []
         [v]    -> [slider sliderWidth v]
-        (v:vs) -> sliderBase False True sliderWidth v : mkSliders' vs
+        (v:vs) -> sliderBase (Neighbor False True False False) sliderWidth v : mkSliders' vs
     mkSliders' = \case
         []     -> []
-        [v]    -> [sliderBase True False sliderWidth v]
-        (v:vs) -> sliderBase True True sliderWidth v : mkSliders' vs
+        [v]    -> [sliderBase (Neighbor True False False False) sliderWidth v]
+        (v:vs) -> sliderBase  (Neighbor True True  False False) sliderWidth v : mkSliders' vs
 
     sliders'    = mconcat $ (\(s,i) -> move (i * (sliderWidth + soff)) 0 s) <$> zip sliders [0..]
 
@@ -1003,11 +1010,11 @@ valColor = "rgba(255,255,255,0.14)"
 --         $ Map.insert "Bool" (toggle True)
 --         $ mempty
 
-widgets :: Map Text (Text -> Geo)
-widgets = Map.insert "Number" (slider 280 . unsafeRead . convert)
-        $ Map.insert "Bool"   (toggle . unsafeRead . convert)
-        $ Map.insert "Text"   (textField 280)
-        $ Map.insert "Vector" (vectorWidget 280 . unsafeRead . convert)
+widgets :: Map Text (Text -> OrientationLine -> NeighborLine -> Geo)
+widgets = Map.insert "Number" (\t ol nl -> slider2 280 (unsafeRead . convert $ t) ol nl)
+        $ Map.insert "Bool"   (\t ol nl -> toggle . unsafeRead . convert $ t)
+        $ Map.insert "Text"   (\t ol nl -> textField 280 $ t)
+        $ Map.insert "Vector" (\t ol nl -> vectorWidget 280 . unsafeRead . convert $ t)
         $ mempty
 
 arrow :: Point -> Point -> Geo
@@ -1045,12 +1052,14 @@ class Measurable a where
 
 -- graph :: Map Int
 
-data Side
-  = LeftSide
-  | RightSide
-  | TopSide
-  | BottomSide
-  deriving (Show, Eq)
+-- data Side
+--   = LeftSide
+--   | RightSide
+--   | TopSide
+--   | BottomSide
+--   deriving (Show, Eq)
+
+data Neighbor = Neighbor { _left :: Bool, _right :: Bool, _top :: Bool, _bottom :: Bool } deriving (Show, Eq)
 
 data Mod
   = Hovered
