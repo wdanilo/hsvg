@@ -757,6 +757,7 @@ setLCtx = leftCtx    .~ True
 setTCtx = topCtx     .~ True
 setBCtx = bottomCtx  .~ True
 setLRCtx = setLCtx . setRCtx
+setBTCtx = setBCtx . setTCtx
 
 setHContexts :: HasContext a => [a] -> [a]
 setHContexts = \case
@@ -820,6 +821,7 @@ drawWidget (Widget cfg _ f) = f cfg
 
 setMaxWidth :: Double -> Widget -> Widget
 setMaxWidth s = widthRange . maxRange .~ Just s
+setMinWidth s = widthRange . minRange .~ Just s
 
 
 drawHWidgetes :: Double -> Double -> [Widget] -> Geo
@@ -896,7 +898,9 @@ gridElemHeight, gridElemHeight2 :: Double
 gridElemOffset :: Double
 gridElemHeight  = 30
 gridElemHeight2 = gridElemHeight / 2
-gridElemOffset  = 4
+gridElemOffset  = 8
+
+subElemOffset = 2
 
 typeColor :: Text -> Text
 typeColor s = "rgb(" <> convert (show $ round r) <> "," <> convert (show $ round g) <> "," <> convert (show $ round b) <> ")" where
@@ -931,6 +935,9 @@ compactNodeBg2 = "rgba(255,255,255,0.06)"
 valueColor :: Text
 valueColor          = "rgba(255,255,255,0.4)"
 valueSecondaryColor = "rgba(255,255,255,0.2)"
+
+valueColorAlpha = 0.4
+valueSecondaryColorAlpha = 0.2
 
 arrowOffset :: Double
 arrowOffset = gridElemOffset + 2
@@ -1045,48 +1052,41 @@ normalNode ins outs mods = body + header + selfPort Nothing where
     headerNeck    = circle compactNodeRadius
                   + (move (-compactNodeRadius) 0 $ alignTopLeft $ rect (3*compactNodeRadius + bodyOffset) (compactNodeRadius + bodyOffset))
                   - move (2*compactNodeRadius + bodyOffset) 0 (circle $ compactNodeRadius + bodyOffset)
-    body          = move (-compactNodeRadius) (compactNodeRadius + bodyOffset) $ bodyBg + move 0 off inPorts
-    bodyBg        = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r r r 300 bodyHeight) where r = compactNodeRadius
+    body          = move (-compactNodeRadius) (compactNodeRadius + bodyOffset) $ bodyBg + move 0 off inPorts + move 0 (bodyHeight + 2) vis
+    bodyBg        = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 r 0 0 300 bodyHeight) where r = compactNodeRadius
     inPorts       = inPortsDesc
     (inPortsDesc, inPortsHeight) = mkPortsGeo ins
     bodyOffset    = arrowOffset
 
 
     mkPortsGeo                      = mkPortsGeo' 0
-    mkPortsGeo' ind ps              = vcat2 0 mempty $ mkPortGeo' ind <$> setContextLine ps
-    mkPortGeo'  ind (nl, Port n t ws ps) = (port + body + move 0 portHeight subGeo, portHeight + subH) where
-        portHeight     = gridElemHeight + gridElemOffset
+    mkPortsGeo' ind ps              = vcat 0 mempty $ mkPortGeo' ind <$> setContextLine ps
+    mkPortGeo'  ind (nl, Port n t ws ps) = (port + body + move 0 portHeight subGeo, portHeight + subH') where
+        portHeight     = if (ind == 0) && (null ps) then gridElemHeight + gridElemOffset
+                                     else gridElemHeight + subElemOffset
         (subGeo, subH) = mkPortsGeo' (succ ind) ps
+        subH'          = if null ps then subH else subH + gridElemOffset - subElemOffset
         port           = move (-(6+off)*ind) 0 (fill (typeColor t) (portShape + lab))
         lab            = if Hovered `elem` mods then move (-2*off - 10) gridElemHeight2 (portInLabelBase n) else mempty
         portShape      = move (-off) gridElemHeight2 $ alignRight ss
         ss             = if null ps then arrowHead else rotate 90 arrowHead + (alignTop $ rect 2 psHeight)
-        -- body           = if null ps then move off 0 (drawHWidgetes 280 gridElemOffset ws) else move 150 gridElemHeight2 (sectionLabel "position") + (xx - yy)
-        body           = move off 0 (drawHWidgetes 280 gridElemOffset ws)
-        -- xx             = move 150 gridElemHeight2 $ alignTop $ strokeWidth 2 $ strokeColor "rgba(255,255,255,0.1)" $ fill "rgba(0,0,0,0)"
-        --                $ roundedRect gridElemHeight2 gridElemHeight2 gridElemHeight2 gridElemHeight2 290 200
-        xx             = fill "rgba(255,255,255,0.1)" $ move 150 gridElemHeight2 $ rect 280 2
-        yy             = move 150 gridElemHeight2 $ rect 100 10
+        body           = move off 0 (drawHWidgetes 280 subElemOffset ws)
         psHeight       = subH + gridElemHeight2
 
--- drawHWidgetes :: Double -> Double -> [Widget] -> Geo
+    vcat :: Double -> Geo -> [(Geo, Double)] -> (Geo, Double)
+    vcat s g [] = (g,s)
+    vcat s g ((p,d):ps) = vcat (s+d) (g + move 0 s p) ps
 
 
-    vcat :: Double -> [(Geo, Double)] -> Geo
-    vcat s [] = mempty
-    vcat s ((p,d):ps) = move 0 s p + vcat (s + d) ps
-
-    vcat2 :: Double -> Geo -> [(Geo, Double)] -> (Geo, Double)
-    vcat2 s g [] = (g,s)
-    vcat2 s g ((p,d):ps) = vcat2 (s+d) (g + move 0 s p) ps
-
-
-    bodyHeight = max inPortsHeight 0 + 2 * off
+    bodyHeight = max inPortsHeight 0 + 2 * off - gridElemOffset
 
     off         = 10
 
     portsHeight ps = sum (snd <$> ps) + max 0 (convert $ length ps) * gridElemOffset + gridElemHeight2
 
+    vis   = visBg + move 150 150 (fill "#000000" (polyCircle 88 8) + fill "#8c344a" (polyCircle 80 8) )
+    visBg = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 0 r r 300 300) where r = compactNodeRadius
+    polyCircle r s = path $ (\i -> pt (r * (sin $ 2 * pi * i/s)) (r * (cos $ 2 * pi * i/s))) <$> [0.. (s - 1)]
 
 
 extendPlaces :: Double -> Int
@@ -1152,6 +1152,7 @@ layerBg  = "rgba(255,255,255,0.06)"
 layerVal = "rgba(255,255,255,0.08)"
 valColor = "rgba(255,255,255,0.14)"
 
+layerValAlpha = 0.08
 
 arrow :: Point -> Point -> Geo
 arrow p p' = rotateRad (angle p p') $ linkLine len + (move len 0 arrowHead) where
@@ -1298,8 +1299,10 @@ toggleWidget :: Bool -> Widget
 toggleWidget = simpleWidget . toggle
 
 
+dropDown2 s = setBCtx $ dropDown s
+
 dropDown :: Text -> Widget
-dropDown s = setMaxWidth 120 $ widget f where
+dropDown s = setMaxWidth 120 $ setMinWidth 120 $ widget f where
     f (WidgetConfig w (Context l r t b)) = body + txt + arrow where
         body    = fill layerBg bodyGeo
         bodyGeo = alignTopLeft $ roundedRect clt crt crb clb w gridElemHeight
@@ -1310,8 +1313,30 @@ dropDown s = setMaxWidth 120 $ widget f where
         clb     = if l || b then 0 else gridElemHeight2
         crb     = if r || b then 0 else gridElemHeight2
 
+colorTile :: Text -> Widget
+colorTile s = setMaxWidth gridElemHeight $ setMinWidth gridElemHeight $ widget f where
+    f (WidgetConfig w (Context l r t b)) = body where
+        body    = fill s bodyGeo
+        bodyGeo = alignTopLeft $ roundedRect clt crt crb clb w gridElemHeight
+        clt     = if l || t then 0 else gridElemHeight2
+        crt     = if r || t then 0 else gridElemHeight2
+        clb     = if l || b then 0 else gridElemHeight2
+        crb     = if r || b then 0 else gridElemHeight2
 
-dropDown2 s = setBCtx $ dropDown s
+newLayer :: Widget
+newLayer = widget f where
+    f (WidgetConfig w (Context l r t b)) = body + cross where
+        body    = fill layerBg bodyGeo
+        bodyGeo = alignTopLeft $ roundedRect clt crt crb clb w gridElemHeight
+        cross     = opacity valueSecondaryColorAlpha $ fill "white" $ move (w/2) gridElemHeight2 $ crossLine + rotate 90 crossLine
+        crossLine = rect crossLineL 2
+        crossLineL = gridElemHeight - 16
+        clt     = if l || t then 0 else gridElemHeight2
+        crt     = if r || t then 0 else gridElemHeight2
+        clb     = if l || b then 0 else gridElemHeight2
+        crb     = if r || b then 0 else gridElemHeight2
+
+
 
 
 
@@ -1340,8 +1365,8 @@ main = do
             --         []
             --         [ Port "out" "Number" "0" [] ]
             --         CompactNode2 [Hovered]
-               Node (Point 950 800) Nothing
-                    [ Port "type"      "Type"   [dropDown "Polygon", sliderWidget 20]    []
+               Node (Point 950 200) Nothing
+                    [ Port "type"      "Type"   [dropDown "Polygon", sliderWidget 8]    []
                     -- , Port "enabled"   "Bool"   [toggleWidget True] []
                     , Port "radius"    "Number" [sliderWidget 20]  []
                     , Port "transform" "Transform" [dropDown2 "Transform"]
@@ -1350,6 +1375,13 @@ main = do
                           , Port "scale"     "Vector" [sliderWidgetM 1  , sliderWidgetM 1  , sliderWidgetM 1]   []
                           , Port "shear"     "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
                           , Port "pivot"     "Vector" [sliderWidgetT 0  , sliderWidgetT 0  , sliderWidgetT 0]   []
+                          ]
+                    , Port "material" "Material" [dropDown2 "Material"]
+                          [ Port "layer"     "Layer" [setBTCtx $ dropDown "Fill"   , sliderWidgetB 1 , setBCtx  $ colorTile "#8c344a"] []
+                        --   , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke" , sliderWidgetM 8 , setBTCtx $ colorTile "#000000"] []
+                          , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke"] [Port "type" "Type" [sliderWidgetM 8] [], Port "color" "Color" [setBTCtx $ colorTile "#000000"] []] 
+                          , Port "layer"     "Layer" [setBTCtx $ dropDown "Shadow" , sliderWidgetM 16, setBTCtx $ colorTile "#000000"] []
+                          , Port "new layer" "Layer" [setTCtx  $ newLayer]   []
                           ]
                     -- , Port "name"     "Text"   [textWidget "name"] []
                     ]
@@ -1373,6 +1405,17 @@ main = do
   return ()
   tescik
 
+-- data Style
+--   = Fill        Text
+--   | Opacity     Double
+--   | Stroke      Text
+--   | StrokeWidth Double
+--   | Hinting     Hinting
+--   | FontFamily  Text
+--   | FontSize    Int
+--   | FontWeight  Int
+--   | TextAnchor  TextAnchor
+--   | CSS         Text Text
 
 mkView s = "<!DOCTYPE html>"
         <> "<html>"
