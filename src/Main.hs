@@ -819,10 +819,10 @@ widget = Widget def def
 drawWidget :: Widget -> Geo
 drawWidget (Widget cfg _ f) = f cfg
 
-setMaxWidth :: Double -> Widget -> Widget
-setMaxWidth s = widthRange . maxRange .~ Just s
-setMinWidth s = widthRange . minRange .~ Just s
-
+setMaxWidth, setMinWidth, setFixedWidth :: Double -> Widget -> Widget
+setMaxWidth   s = widthRange . maxRange .~ Just s
+setMinWidth   s = widthRange . minRange .~ Just s
+setFixedWidth s = setMaxWidth s . setMinWidth s
 
 drawHWidgetes :: Double -> Double -> [Widget] -> Geo
 drawHWidgetes xsize off ws = fst result where
@@ -1118,7 +1118,7 @@ sliderBase (Context l r t b) width s = body + val + txt (show' ipart) (show' fpa
     p       = s / 10 ^^ (ceiling $ logBase 10 s)
 
 
-vectorWidget :: Double -> [Double] -> Geo
+vectorWidget :: Double -> [Double] -> GeoZ
 vectorWidget width vals = sliders' where
     snum        = convert (length vals)
     sliderWidth = (width - soff * (snum - 1)) / snum
@@ -1176,7 +1176,7 @@ triangle' :: Geo
 triangle' = fill valueColor $ triangle 10 7
 
 dropDownTriangle :: Geo
-dropDownTriangle = fill valueSecondaryColor $ move (-a) 0 $ rotate 90 $ triangle a 4 where a = 5
+dropDownTriangle = fill valueSecondaryColor $ move a 0 $ rotate 90 $ triangle a 4 where a = 5
 
 
 inPortHead, outPortHead :: Geo
@@ -1302,19 +1302,22 @@ toggleWidget = simpleWidget . toggle
 dropDown2 s = setBCtx $ dropDown s
 
 dropDown :: Text -> Widget
-dropDown s = setMaxWidth 120 $ setMinWidth 120 $ widget f where
+dropDown s =  widget f where
     f (WidgetConfig w (Context l r t b)) = body + txt + arrow where
         body    = fill layerBg bodyGeo
         bodyGeo = alignTopLeft $ roundedRect clt crt crb clb w gridElemHeight
-        arrow   = move (w - 7) gridElemHeight2 dropDownTriangle
-        txt     = move 10 0 $ valueNumLabel s
+        arrow   = move 7 gridElemHeight2 dropDownTriangle
+        txt     = move 24 0 $ valueNumLabel s
         clt     = if l || t then 0 else gridElemHeight2
         crt     = if r || t then 0 else gridElemHeight2
         clb     = if l || b then 0 else gridElemHeight2
         crb     = if r || b then 0 else gridElemHeight2
 
 colorTile :: Text -> Widget
-colorTile s = setMaxWidth gridElemHeight $ setMinWidth gridElemHeight $ widget f where
+colorTile s = setFixedWidth gridElemHeight $ colorPreview s
+
+colorPreview :: Text -> Widget
+colorPreview s = widget f where
     f (WidgetConfig w (Context l r t b)) = body where
         body    = fill s bodyGeo
         bodyGeo = alignTopLeft $ roundedRect clt crt crb clb w gridElemHeight
@@ -1338,8 +1341,12 @@ newLayer = widget f where
 
 
 
+spring :: Widget
+spring = widget f where
+    f (WidgetConfig w _) = opacity 0 $ rect w gridElemHeight
 
-
+fixedSpring :: Double -> Widget
+fixedSpring s = setFixedWidth s spring
 
 main :: IO ()
 main = do
@@ -1370,16 +1377,19 @@ main = do
                     -- , Port "enabled"   "Bool"   [toggleWidget True] []
                     , Port "radius"    "Number" [sliderWidget 20]  []
                     , Port "transform" "Transform" [dropDown2 "Transform"]
-                          [ Port "translate" "Vector" [sliderWidgetM 0.3, sliderWidgetB 0.7, sliderWidgetB 0.2] []
+                          [ Port "translate" "Vector" [sliderWidgetM 0.3, sliderWidgetB 0.7, sliderWidgetM 0.2] []
                           , Port "rotate"    "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
                           , Port "scale"     "Vector" [sliderWidgetM 1  , sliderWidgetM 1  , sliderWidgetM 1]   []
                           , Port "shear"     "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
                           , Port "pivot"     "Vector" [sliderWidgetT 0  , sliderWidgetT 0  , sliderWidgetT 0]   []
                           ]
                     , Port "material" "Material" [dropDown2 "Material"]
-                          [ Port "layer"     "Layer" [setBTCtx $ dropDown "Fill"   , sliderWidgetB 1 , setBCtx  $ colorTile "#8c344a"] []
+                          [ Port "layer"     "Layer" [setBTCtx $ dropDown "Fill"   , sliderWidgetB 1 , setBTCtx  $ colorTile "#8c344a"] []
                         --   , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke" , sliderWidgetM 8 , setBTCtx $ colorTile "#000000"] []
-                          , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke"] [Port "type" "Type" [sliderWidgetM 8] [], Port "color" "Color" [setBTCtx $ colorTile "#000000"] []] 
+                          , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke"]
+                                [ Port "type"  "Type"  [fixedSpring 20, sliderWidgetM 8]                []
+                                , Port "color" "Color" [fixedSpring 20, setBTCtx $ colorPreview "#000000"] []
+                                ]
                           , Port "layer"     "Layer" [setBTCtx $ dropDown "Shadow" , sliderWidgetM 16, setBTCtx $ colorTile "#000000"] []
                           , Port "new layer" "Layer" [setTCtx  $ newLayer]   []
                           ]
