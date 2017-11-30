@@ -2,7 +2,7 @@
 
 module Main where
 
-import Prologue hiding (Simple, subtract, point, duplicate)
+import Prologue hiding (Simple, subtract, point, duplicate, range, Context)
 import qualified "containers" Data.Map.Strict as Map
 import           "containers" Data.Map.Strict (Map)
 import qualified "containers" Data.Set        as Set
@@ -19,6 +19,8 @@ import           Data.Fixed              (mod')
 import           Data.Hashable (Hashable, hash)
 
 import qualified Shelly as Shelly
+import Data.List (sortBy)
+import Data.Ord (comparing) -- TODO: add to Prologue
 
 -----------------------
 -- === Transform === --
@@ -662,6 +664,186 @@ baseColor3 = "rgb(180,180,180)"
 --   Text.writeFile "/tmp/test.html" (mkView svg)
 --   print "hello"
 
+
+-------------------
+-- === Range === --
+-------------------
+
+-- === Definition === --
+
+data Range = Range
+    { __minRange :: Maybe Double
+    , __maxRange :: Maybe Double
+    } deriving (Show)
+
+makeClassy ''Range
+
+
+-- === Utils === --
+
+maxRange :: HasRange a => Lens' a (Maybe Double)
+minRange :: HasRange a => Lens' a (Maybe Double)
+maxRange = range . range_maxRange
+minRange = range . range_minRange
+
+mkMaxRange, mkMinRange :: Double -> Range
+mkMaxRange = Range Nothing . Just
+mkMinRange = flip Range Nothing . Just
+
+
+-- === Instances === --
+
+instance Default Range where
+    def = Range Nothing Nothing
+
+
+-- === Finding sizes === --
+
+data RangeSetting = RangeSetting
+    { __num   :: Int
+    , __range :: Range
+    , __size  :: Double
+    } deriving (Show)
+
+makeLenses ''RangeSetting
+
+instance HasRange RangeSetting where
+    range = rangeSetting_range
+
+findSizes :: Double -> [Range] -> Maybe [Double]
+findSizes w rs = if
+    | free1 < 0 -> Nothing
+    | null rs   -> Just []
+    | otherwise -> results
+    where results' = growElems (convert $ length rs) free1 sizes1
+          results  = fmap snd . sortBy (comparing fst) <$> results'
+          mins     = fromJust 0 . view minRange <$> rs
+          ranges1  = uncurry RangeSetting <$> zip3 [0..] rs mins
+          sizes1   = reverse $ sortBy (comparing $ view maxRange) ranges1
+          free1    = w - minSum
+          minSum   = sum mins
+          growElems elnum free = \case
+            [] -> Just []
+            RangeSetting i r s : els -> case r ^. maxRange of
+                Nothing       -> ok
+                Just maxSize  -> if newSize <= maxSize then ok else ((i, maxSize) :) <$> growElems (pred elnum) (free - (maxSize - s)) els
+                where ok      = Just $ (i, newSize) : (growRest <$> els)
+                      delta   = free / elnum
+                      newSize = s + delta
+                      growRest (RangeSetting i' _ s') = (i', s' + delta)
+
+
+---------------------
+-- === Context === --
+---------------------
+
+-- === Definition === --
+
+data Context = Context
+    { _leftCtx   :: Bool
+    , _rightCtx  :: Bool
+    , _topCtx    :: Bool
+    , _bottomCtx :: Bool
+    } deriving (Show)
+
+makeClassy ''Context
+
+
+-- === Utils === --
+
+setRCtx, setLCtx, setTCtx, setBCtx, setLRCtx :: HasContext a => a -> a
+setRCtx = rightCtx   .~ True
+setLCtx = leftCtx    .~ True
+setTCtx = topCtx     .~ True
+setBCtx = bottomCtx  .~ True
+setLRCtx = setLCtx . setRCtx
+
+setHContexts :: HasContext a => [a] -> [a]
+setHContexts = \case
+    []     -> []
+    [a]    -> [a]
+    (a:as) -> setRCtx a : setHContexts' as where
+        setHContexts' = \case
+            []     -> []
+            [a]    -> [setLCtx a]
+            (a:as) -> setLRCtx a : setHContexts' as
+
+
+
+-- === Instances === --
+
+instance Default Context where
+    def = Context False False False False
+
+
+
+---------------------
+-- === Widgets === --
+---------------------
+
+data WidgetConfig = WidgetConfig
+     { __width  :: Double
+     , __context :: Context
+     } deriving (Show)
+
+data Widget = Widget
+    { _config     :: WidgetConfig
+    , _widthRange :: Range
+    , _cons       :: WidgetConfig -> Geo
+    }
+
+makeLenses ''Widget
+makeLenses ''WidgetConfig
+
+instance WidthGetter WidgetConfig where
+    getWidth (WidgetConfig w _) = w
+
+
+instance WidthSetter WidgetConfig where
+    setWidth w (WidgetConfig _ c) = WidgetConfig w c
+
+instance HasContext Widget where
+    context = config . context
+
+instance HasContext WidgetConfig where
+    context = widgetConfig_context
+
+
+simpleWidget :: Geo -> Widget
+simpleWidget = widget . const
+
+widget :: (WidgetConfig -> Geo) -> Widget
+widget = Widget def def
+
+drawWidget :: Widget -> Geo
+drawWidget (Widget cfg _ f) = f cfg
+
+setMaxWidth :: Double -> Widget -> Widget
+setMaxWidth s = widthRange . maxRange .~ Just s
+
+
+drawHWidgetes :: Double -> Double -> [Widget] -> Geo
+drawHWidgetes xsize off ws = fst result where
+    ws'        = setHContexts ws
+    elNum      = convert $ length ws
+    allOff     = (elNum - 1) * off
+    Just sizes = findSizes (xsize - allOff) (view widthRange <$> ws)
+    geos       = drawWidget . (\(w,s)-> w & config . width .~ s) <$> zip ws' sizes
+    result     = foldl (\(g,s) (g',s') -> (g + move s 0 g', s + off + s')) (mempty, 0) $ zip geos sizes
+
+-- foldl :: (a -> b -> a) -> a -> [b] -> a
+
+instance Default WidgetConfig where
+    def = WidgetConfig 280 def
+
+
+
+
+
+tescik = do
+    print "hello"
+    print $ findSizes 300 [Range Nothing Nothing, Range Nothing (Just 5), Range Nothing Nothing, Range Nothing (Just 7)]
+
 duplicate i x y s = mconcat $ (\j -> move (j*x) (j*y) s) <$> [0..i]
 
 -- bgColor = "#141210"
@@ -746,6 +928,10 @@ compactNodeBg :: Text
 compactNodeBg  = "rgba(255,255,255,0.16)"
 compactNodeBg2 = "rgba(255,255,255,0.06)"
 
+valueColor :: Text
+valueColor          = "rgba(255,255,255,0.4)"
+valueSecondaryColor = "rgba(255,255,255,0.2)"
+
 arrowOffset :: Double
 arrowOffset = gridElemOffset + 2
 
@@ -802,7 +988,7 @@ valueLabelBase :: Text -> Geo
 valueLabelBase = textVAlignMiddle . fontWeight 600 . fontSize 17 . fontFamily "Helvetica Neue" . text
 
 valueLabel :: Text -> Geo
-valueLabel = move 0 gridElemHeight2 . fill "rgba(255,255,255,0.4)" . valueLabelBase
+valueLabel = move 0 gridElemHeight2 . fill valueColor . valueLabelBase
 
 valueNumLabel :: Text -> Geo
 valueNumLabel = move 0 1 . valueLabel
@@ -830,7 +1016,8 @@ labelBase :: Text -> Geo
 labelBase = textVAlignMiddle . fontSize 17 . fontFamily "Helvetica Neue" . text
 
 
-data NeighborLine
+
+data ContextLine
     = First
     | Middle
     | Last
@@ -842,14 +1029,15 @@ data OrientationLine
     | Horizontal
     deriving (Show, Eq)
 
-setNeighborLine = \case
+setContextLine = \case
     []     -> []
     [a]    -> [(Only,a)]
-    (a:as) -> (First,a) : setNeighborLine' as
-setNeighborLine' = \case
+    (a:as) -> (First,a) : setContextLine' as
+
+setContextLine' = \case
     []     -> []
     [a]    -> [(Last, a)]
-    (a:as) -> (Middle, a) : setNeighborLine' as
+    (a:as) -> (Middle, a) : setContextLine' as
 
 normalNode :: [Port] -> [Port] -> [Mod] -> Geo
 normalNode ins outs mods = body + header + selfPort Nothing where
@@ -865,20 +1053,25 @@ normalNode ins outs mods = body + header + selfPort Nothing where
 
 
     mkPortsGeo                      = mkPortsGeo' 0
-    mkPortsGeo' ind ps              = vcat2 0 mempty $ mkPortGeo' ind <$> setNeighborLine ps
-    mkPortGeo'  ind (nl, Port n t v ps) = (port + body + move 0 portHeight subGeo, portHeight + subH) where
+    mkPortsGeo' ind ps              = vcat2 0 mempty $ mkPortGeo' ind <$> setContextLine ps
+    mkPortGeo'  ind (nl, Port n t ws ps) = (port + body + move 0 portHeight subGeo, portHeight + subH) where
         portHeight     = gridElemHeight + gridElemOffset
         (subGeo, subH) = mkPortsGeo' (succ ind) ps
         port           = move (-(6+off)*ind) 0 (fill (typeColor t) (portShape + lab))
         lab            = if Hovered `elem` mods then move (-2*off - 10) gridElemHeight2 (portInLabelBase n) else mempty
         portShape      = move (-off) gridElemHeight2 $ alignRight ss
         ss             = if null ps then arrowHead else rotate 90 arrowHead + (alignTop $ rect 2 psHeight)
-        body           = if null ps then move off 0 v else move 150 gridElemHeight2 (sectionLabel "position") + (xx - yy)
+        -- body           = if null ps then move off 0 (drawHWidgetes 280 gridElemOffset ws) else move 150 gridElemHeight2 (sectionLabel "position") + (xx - yy)
+        body           = move off 0 (drawHWidgetes 280 gridElemOffset ws)
         -- xx             = move 150 gridElemHeight2 $ alignTop $ strokeWidth 2 $ strokeColor "rgba(255,255,255,0.1)" $ fill "rgba(0,0,0,0)"
         --                $ roundedRect gridElemHeight2 gridElemHeight2 gridElemHeight2 gridElemHeight2 290 200
         xx             = fill "rgba(255,255,255,0.1)" $ move 150 gridElemHeight2 $ rect 280 2
         yy             = move 150 gridElemHeight2 $ rect 100 10
         psHeight       = subH + gridElemHeight2
+
+-- drawHWidgetes :: Double -> Double -> [Widget] -> Geo
+
+
     vcat :: Double -> [(Geo, Double)] -> Geo
     vcat s [] = mempty
     vcat s ((p,d):ps) = move 0 s p + vcat (s + d) ps
@@ -900,18 +1093,13 @@ extendPlaces :: Double -> Int
 extendPlaces i = if mod' i 1 == 0 then floor i else extendPlaces (10 * i)
 
 slider :: Double -> Double -> Geo
-slider = sliderBase (Neighbor False False False False)
+slider = sliderBase (Context False False False False)
 
-slider2 :: Double -> Double -> OrientationLine -> NeighborLine -> Geo
-slider2 w s ol nl = sliderBase n w s where
-    n = case (ol,nl) of
-        (Vertical, Only)   -> Neighbor False False False False
-        (Vertical, First)  -> Neighbor False False False True
-        (Vertical, Last)   -> Neighbor False False True  False
-        (Vertical, Middle) -> Neighbor False False True  True
+slider2 :: Double -> Context -> Double -> Geo
+slider2 w c s = sliderBase c w s
 
-sliderBase :: Neighbor -> Double -> Double -> Geo
-sliderBase (Neighbor l r t b) width s = body + val + txt (show' ipart) (show' fpart) where
+sliderBase :: Context -> Double -> Double -> Geo
+sliderBase (Context l r t b) width s = body + val + txt (show' ipart) (show' fpart) where
     txt s t = move (width/2) 0
             $ move (-dotoff) 0 (textAnchorEnd    $ valueNumLabel s)
             + move   dotoff  0 (textAnchorStart  $ valueNumLabel t)
@@ -939,11 +1127,11 @@ vectorWidget width vals = sliders' where
     mkSliders = \case
         []     -> []
         [v]    -> [slider sliderWidth v]
-        (v:vs) -> sliderBase (Neighbor False True False False) sliderWidth v : mkSliders' vs
+        (v:vs) -> sliderBase (Context False True False False) sliderWidth v : mkSliders' vs
     mkSliders' = \case
         []     -> []
-        [v]    -> [sliderBase (Neighbor True False False False) sliderWidth v]
-        (v:vs) -> sliderBase  (Neighbor True True  False False) sliderWidth v : mkSliders' vs
+        [v]    -> [sliderBase (Context True False False False) sliderWidth v]
+        (v:vs) -> sliderBase  (Context True True  False False) sliderWidth v : mkSliders' vs
 
     sliders'    = mconcat $ (\(s,i) -> move (i * (sliderWidth + soff)) 0 s) <$> zip sliders [0..]
 
@@ -980,6 +1168,16 @@ arrowHead2 = path [pt 0 headW, pt headL 0, pt 0 (-headW)] where
     headL  = 14
 
 
+triangle :: Double -> Double -> Geo
+triangle w l = path [pt (-l) w, pt l 0, pt (-l) (-w)]
+
+triangle' :: Geo
+triangle' = fill valueColor $ triangle 10 7
+
+dropDownTriangle :: Geo
+dropDownTriangle = fill valueSecondaryColor $ move (-a) 0 $ rotate 90 $ triangle a 4 where a = 5
+
+
 inPortHead, outPortHead :: Geo
 inPortHead  = move (-14) 0 arrowHead2
 outPortHead = move (-3) 0 arrowHead2
@@ -994,9 +1192,23 @@ linkLine len = alignLeft $ rect len aWidth where
 
 
 
-class Measurable a where
-    height :: a -> Double
-    width  :: a -> Double
+-- class Measurable a where
+--     height :: a -> Double
+--     width  :: a -> Double
+
+class WidthGetter a where getWidth :: a -> Double
+class WidthSetter a where setWidth :: Double -> a -> a
+type  HasWidth    a = (WidthGetter a, WidthSetter a)
+
+class HeightGetter a where getHeight :: a -> Double
+class HeightSetter a where setHeight :: Double -> a -> a
+type  HasHeight    a = (HeightGetter a, HeightSetter a)
+
+width :: HasWidth a => Lens' a Double
+width = lens getWidth (flip setWidth)
+
+height :: HasHeight a => Lens' a Double
+height = lens getHeight (flip setHeight)
 
 -- graph :: Map Int
 
@@ -1007,7 +1219,9 @@ class Measurable a where
 --   | BottomSide
 --   deriving (Show, Eq)
 
-data Neighbor = Neighbor { _left :: Bool, _right :: Bool, _top :: Bool, _bottom :: Bool } deriving (Show, Eq)
+
+
+
 
 data Mod
   = Hovered
@@ -1035,14 +1249,14 @@ data BasePort = SelfPort Text
 
 data Port = Port { _name     :: Text
                  , _tp       :: Text
-                 , _widget   :: Geo
+                 , _widgets  :: [Widget]
                  , _subPorts :: [Port]
                  }
 
-instance Measurable [Port] where
-    height ps = portNum * gridElemHeight + (max 0 $ portNum - 1) * gridElemOffset where
-        portNum = sum $ countPorts <$> ps
-        countPorts (Port _ _ _ ps) = 1 + sum (countPorts <$> ps)
+-- instance Measurable [Port] where
+--     height ps = portNum * gridElemHeight + (max 0 $ portNum - 1) * gridElemOffset where
+--         portNum = sum $ countPorts <$> ps
+--         countPorts (Port _ _ _ ps) = 1 + sum (countPorts <$> ps)
 
 renderNode :: Node -> Geo
 renderNode (Node pos base ins outs pans mods) = move (pos ^. x) (pos ^. y) $ case pans of
@@ -1068,20 +1282,39 @@ buildLCH (Color i) = Color.LCH (colorL i) (colorC i) (convert h') 255 where
     h'    = 190 + (colorH i + (i * 3 - 1)) `mod'` 360
 
 
-sliderWidget :: Double -> Geo
-sliderWidget v = slider2 280 v Vertical Only
+sliderWidget :: Double -> Widget
+sliderWidget v = widget $ \(WidgetConfig w c) -> slider2 w c v
 
-sliderWidgetF, sliderWidgetM, sliderWidgetL :: Double -> Geo
-sliderWidgetF v = slider2 280 v Vertical First
-sliderWidgetM v = slider2 280 v Vertical Middle
-sliderWidgetL v = slider2 280 v Vertical Last
+sliderWidgetT, sliderWidgetM, sliderWidgetB :: Double -> Widget
+sliderWidgetT v = widget $ \(WidgetConfig w c) -> slider2 w (setTCtx c) v
+sliderWidgetM v = widget $ \(WidgetConfig w c) -> slider2 w (setTCtx $ setBCtx c) v
+sliderWidgetB v = widget $ \(WidgetConfig w c) -> slider2 w (setBCtx c) v
 
 
-textWidget :: Text -> Geo
-textWidget = textField 280
+textWidget :: Text -> Widget
+textWidget t = widget $ \(WidgetConfig w _) -> textField w t
 
-toggleWidget :: Bool -> Geo
-toggleWidget = toggle
+toggleWidget :: Bool -> Widget
+toggleWidget = simpleWidget . toggle
+
+
+dropDown :: Text -> Widget
+dropDown s = setMaxWidth 120 $ widget f where
+    f (WidgetConfig w (Context l r t b)) = body + txt + arrow where
+        body    = fill layerBg bodyGeo
+        bodyGeo = alignTopLeft $ roundedRect clt crt crb clb w gridElemHeight
+        arrow   = move (w - 7) gridElemHeight2 dropDownTriangle
+        txt     = move 10 0 $ valueNumLabel s
+        clt     = if l || t then 0 else gridElemHeight2
+        crt     = if r || t then 0 else gridElemHeight2
+        clb     = if l || b then 0 else gridElemHeight2
+        crb     = if r || b then 0 else gridElemHeight2
+
+
+dropDown2 s = setBCtx $ dropDown s
+
+
+
 
 main :: IO ()
 main = do
@@ -1108,16 +1341,19 @@ main = do
             --         [ Port "out" "Number" "0" [] ]
             --         CompactNode2 [Hovered]
                Node (Point 950 800) Nothing
-                    [ Port "enabled"  "Bool"   (toggleWidget True) []
-                    , Port "blur"     "Number" (sliderWidget 0.7)  []
-                    , Port "position" "Vector" (sliderWidget 0.7)
-                          [ Port "x"     "Number" (sliderWidgetF 0.3)  []
-                          , Port "y"     "Number" (sliderWidgetM 0.7)  []
-                          , Port "z"     "Number" (sliderWidgetL 0.2)  []
+                    [ Port "type"      "Type"   [dropDown "Polygon", sliderWidget 20]    []
+                    -- , Port "enabled"   "Bool"   [toggleWidget True] []
+                    , Port "radius"    "Number" [sliderWidget 20]  []
+                    , Port "transform" "Transform" [dropDown2 "Transform"]
+                          [ Port "translate" "Vector" [sliderWidgetM 0.3, sliderWidgetB 0.7, sliderWidgetB 0.2] []
+                          , Port "rotate"    "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
+                          , Port "scale"     "Vector" [sliderWidgetM 1  , sliderWidgetM 1  , sliderWidgetM 1]   []
+                          , Port "shear"     "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
+                          , Port "pivot"     "Vector" [sliderWidgetT 0  , sliderWidgetT 0  , sliderWidgetT 0]   []
                           ]
-                    , Port "name"     "Text"   (textWidget "name") []
+                    -- , Port "name"     "Text"   [textWidget "name"] []
                     ]
-                    [ Port "out"      "Int"    (sliderWidget 0) [] ]
+                    [ Port "out"      "Int"    [sliderWidget 0] [] ]
                     NormalNode2  [Hovered]
               ]
 
@@ -1135,6 +1371,7 @@ main = do
   Text.writeFile "/tmp/test.html" (mkView svg)
   Shelly.shelly $ Shelly.run "google-chrome-stable" ["/tmp/test.html"]
   return ()
+  tescik
 
 
 mkView s = "<!DOCTYPE html>"
