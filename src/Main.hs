@@ -751,7 +751,7 @@ makeClassy ''Context
 
 -- === Utils === --
 
-setRCtx, setLCtx, setTCtx, setBCtx, setLRCtx :: HasContext a => a -> a
+setRCtx, setLCtx, setTCtx, setBCtx, setLRCtx, setBTCtx :: HasContext a => a -> a
 setRCtx = rightCtx   .~ True
 setLCtx = leftCtx    .~ True
 setTCtx = topCtx     .~ True
@@ -898,7 +898,8 @@ gridElemHeight, gridElemHeight2 :: Double
 gridElemOffset :: Double
 gridElemHeight  = 30
 gridElemHeight2 = gridElemHeight / 2
-gridElemOffset  = 8
+gridElemOffset  = 18
+gridElemOffset_l2 = 6
 
 subElemOffset = 2
 
@@ -923,14 +924,20 @@ circleShadow small big = mconcat $ (fill "rgba(0,0,0,0.02)" . circle . convert) 
 -- === Compact node === --
 
 compactNodeRadius :: Double
-compactNodeRadius = 20
+compactNodeRadius = 30
 
 nodeBorder :: Double
 nodeBorder = compactNodeRadius - selfPortRadius
 
+nodeBgAlpha :: Double
+nodeBgAlpha = 0.04
+
+fillNodeBg :: Geo -> Geo
+fillNodeBg = opacity nodeBgAlpha . fill "white"
+
 compactNodeBg :: Text
 compactNodeBg  = "rgba(255,255,255,0.16)"
-compactNodeBg2 = "rgba(255,255,255,0.06)"
+compactNodeBg2 = "rgba(255,255,255," <> show' nodeBgAlpha <> ")"
 
 valueColor :: Text
 valueColor          = "rgba(255,255,255,0.4)"
@@ -1065,7 +1072,7 @@ normalNode ins outs mods = body + header + selfPort Nothing where
         portHeight     = if (ind == 0) && (null ps) then gridElemHeight + gridElemOffset
                                      else gridElemHeight + subElemOffset
         (subGeo, subH) = mkPortsGeo' (succ ind) ps
-        subH'          = if null ps then subH else subH + gridElemOffset - subElemOffset
+        subH'          = if null ps || (ind > 0) then subH else subH + gridElemOffset - subElemOffset
         port           = move (-(6+off)*ind) 0 (fill (typeColor t) (portShape + lab))
         lab            = if Hovered `elem` mods then move (-2*off - 10) gridElemHeight2 (portInLabelBase n) else mempty
         portShape      = move (-off) gridElemHeight2 $ alignRight ss
@@ -1087,6 +1094,71 @@ normalNode ins outs mods = body + header + selfPort Nothing where
     vis   = visBg + move 150 150 (fill "#000000" (polyCircle 88 8) + fill "#8c344a" (polyCircle 80 8) )
     visBg = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 0 r r 300 300) where r = compactNodeRadius
     polyCircle r s = path $ (\i -> pt (r * (sin $ 2 * pi * i/s)) (r * (cos $ 2 * pi * i/s))) <$> [0.. (s - 1)]
+
+
+normalNode2 :: [Port] -> [Port] -> [Mod] -> Geo
+normalNode2 ins outs mods = nodeShape + selection + selfPort Nothing + arrangeBody (move 0 off inPorts) where -- + move 0 (bodyHeight + 2) vis) where
+    mkNodeShape border = header + body where
+        header         = circle r1
+                       + move (-headerR) 0         (alignTopLeft $ rect headerR (compactNodeRadius + headerOffset))
+                       + move 0          (-interh) (alignTopLeft $ rect dx      (compactNodeRadius + headerOffset))
+                       - move dx (-dy) (circle r2)
+        dy = slope
+        r1 = headerR
+        r2 = compactNodeRadius + headerOffset + slope - border
+        dx = sqrt $ (r1+r2)^2 - dy^2
+        interh = border * r1/r2
+        body           = arrangeBody bodyBg
+        headerR        = compactNodeRadius + border
+        bodyBg         = move (-border) (-border) (alignTopLeft $ roundedRect 0 r r r (bodyWidth + 2*border) (bodyHeight + 2*border)) where r = headerR
+        slope          = 10
+    nodeShape       = fillNodeBg $ mkNodeShape 0
+    selection       = if not (Selected `elem` mods) then mempty else
+                      opacity 0.5 $ fill "hsl(40,100%,50%)" $ mkNodeShape (selectionOffset + selectionWidth) - mkNodeShape selectionOffset
+    selectionWidth  = 4
+    selectionOffset = 4
+    headerOffset    = arrowOffset
+    inPorts         = inPortsDesc
+    (inPortsDesc, inPortsHeight) = mkPortsGeo ins
+    arrangeBody = move (-compactNodeRadius) (compactNodeRadius + headerOffset)
+
+
+    mkPortsGeo                      = mkPortsGeo' 0
+    mkPortsGeo' ind ps              = vcat 0 mempty $ mkPortGeo' ind <$> setContextLine ps
+    mkPortGeo'  ind (nl, Port n t ws ps) = (port + widgets + move 0 portHeight subGeo, portHeight + subH') where
+        -- portHeight     = gridElemHeight + gridElemOffset
+        portHeight     = if (ind == 0) && (null ps) then gridElemHeight + gridElemOffset
+                                                    else gridElemHeight + gridElemOffset_l2
+        (subGeo, subH) = mkPortsGeo' (succ ind) ps
+        subH'          = if null ps || (ind > 0) then subH else subH + gridElemOffset - subElemOffset
+        offWhenInd i   = if ind == i then off else 0
+        port           = fill portColor $ move (indOff - offWhenInd 0) 0 $ portShape + lab
+        lab            = if Hovered `elem` mods then move (-off - offWhenInd 1) gridElemHeight2 (portInLabelBase n) else mempty
+        portColor      = if Hovered `elem` mods then typeColor t else "rgba(0,0,0,0)"
+        portShape      = move 0 gridElemHeight2 $ alignLeft arrow
+        arrow          = ifThenElseId (not $ null ps) (rotate 90) arrowHead -- + (alignTop $ rect 2 psHeight)
+        widgets        = move (off + indOff) 0 (drawHWidgetes (contentWidth - indOff) subElemOffset ws)
+        indOff         = off * ind
+        psHeight       = subH + gridElemHeight2
+
+    vcat :: Double -> Geo -> [(Geo, Double)] -> (Geo, Double)
+    vcat s g [] = (g,s)
+    vcat s g ((p,d):ps) = vcat (s+d) (g + move 0 s p) ps
+
+
+    bodyHeight = max inPortsHeight 0 + 2 * off - gridElemOffset
+    bodyWidth  = contentWidth + 2*off
+    contentWidth = 280
+
+    off         = nodeBorder
+
+    portsHeight ps = sum (snd <$> ps) + max 0 (convert $ length ps) * gridElemOffset + gridElemHeight2
+
+    vis   = visBg + move 150 150 (fill "#000000" (polyCircle 88 8) + fill "#8c344a" (polyCircle 80 8) )
+    visBg = fill compactNodeBg2 $ (alignTopLeft $ roundedRect 0 0 r r 300 300) where r = compactNodeRadius
+    polyCircle r s = path $ (\i -> pt (r * (sin $ 2 * pi * i/s)) (r * (cos $ 2 * pi * i/s))) <$> [0.. (s - 1)]
+
+
 
 
 extendPlaces :: Double -> Int
@@ -1118,7 +1190,7 @@ sliderBase (Context l r t b) width s = body + val + txt (show' ipart) (show' fpa
     p       = s / 10 ^^ (ceiling $ logBase 10 s)
 
 
-vectorWidget :: Double -> [Double] -> GeoZ
+vectorWidget :: Double -> [Double] -> Geo
 vectorWidget width vals = sliders' where
     snum        = convert (length vals)
     sliderWidth = (width - soff * (snum - 1)) / snum
@@ -1158,10 +1230,13 @@ arrow :: Point -> Point -> Geo
 arrow p p' = rotateRad (angle p p') $ linkLine len + (move len 0 arrowHead) where
     len    = dist p p'
 
+portArrowWidth  = 16
+portArrowHeight = 10
 arrowHead :: Geo
-arrowHead = path [pt (-headL) headW, pt headL 0, pt (-headL) (-headW)] where
-    headW  = 8
-    headL  = 5
+arrowHead = geo where -- - move (-6) 0 geo where
+    geo    = path [pt (-headL) headW, pt headL 0, pt (-headL) (-headW)]
+    headW  = portArrowWidth  / 2
+    headL  = portArrowHeight / 2
 
 arrowHead2 :: Geo
 arrowHead2 = path [pt 0 headW, pt headL 0, pt 0 (-headW)] where
@@ -1232,6 +1307,7 @@ data Mod
 data NodeType
   = CompactNode
   | CompactNode2
+  | NormalNode
   | NormalNode2
   deriving (Show)
 
@@ -1263,7 +1339,8 @@ renderNode :: Node -> Geo
 renderNode (Node pos base ins outs pans mods) = move (pos ^. x) (pos ^. y) $ case pans of
     CompactNode  -> compactNode  ins outs
     CompactNode2 -> compactNode2 base ins outs mods
-    NormalNode2  -> normalNode       ins outs mods
+    NormalNode  -> normalNode       ins outs mods
+    NormalNode2  -> normalNode2       ins outs mods
 
 
 newtype Color = Color { fromColor :: Int } deriving (Eq, Generic, Ord, Show)
@@ -1372,38 +1449,65 @@ main = do
             --         []
             --         [ Port "out" "Number" "0" [] ]
             --         CompactNode2 [Hovered]
-               Node (Point 950 200) Nothing
-                    [ Port "type"      "Type"   [dropDown "Polygon", sliderWidget 8]    []
-                    -- , Port "enabled"   "Bool"   [toggleWidget True] []
-                    , Port "radius"    "Number" [sliderWidget 20]  []
-                    , Port "transform" "Transform" [dropDown2 "Transform"]
-                          [ Port "translate" "Vector" [sliderWidgetM 0.3, sliderWidgetB 0.7, sliderWidgetM 0.2] []
-                          , Port "rotate"    "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
-                          , Port "scale"     "Vector" [sliderWidgetM 1  , sliderWidgetM 1  , sliderWidgetM 1]   []
-                          , Port "shear"     "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
-                          , Port "pivot"     "Vector" [sliderWidgetT 0  , sliderWidgetT 0  , sliderWidgetT 0]   []
-                          ]
-                    , Port "material" "Material" [dropDown2 "Material"]
-                          [ Port "layer"     "Layer" [setBTCtx $ dropDown "Fill"   , sliderWidgetB 1 , setBTCtx  $ colorTile "#8c344a"] []
-                        --   , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke" , sliderWidgetM 8 , setBTCtx $ colorTile "#000000"] []
-                          , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke"]
-                                [ Port "type"  "Type"  [fixedSpring 20, sliderWidgetM 8]                []
-                                , Port "color" "Color" [fixedSpring 20, setBTCtx $ colorPreview "#000000"] []
-                                ]
-                          , Port "layer"     "Layer" [setBTCtx $ dropDown "Shadow" , sliderWidgetM 16, setBTCtx $ colorTile "#000000"] []
-                          , Port "new layer" "Layer" [setTCtx  $ newLayer]   []
-                          ]
-                    -- , Port "name"     "Text"   [textWidget "name"] []
-                    ]
-                    [ Port "out"      "Int"    [sliderWidget 0] [] ]
-                    NormalNode2  [Hovered]
+            --    Node (Point 250 200) Nothing
+            --         [ Port "type"      "Type"   [dropDown "Polygon", sliderWidget 8]    []
+            --         -- , Port "enabled"   "Bool"   [toggleWidget True] []
+            --         , Port "radius"    "Number" [sliderWidget 20]  []
+            --         , Port "transform" "Transform" [dropDown2 "Transform"]
+            --               [ Port "translate" "Vector" [sliderWidgetM 0.3, sliderWidgetB 0.7, sliderWidgetM 0.2] []
+            --               , Port "rotate"    "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
+            --               , Port "scale"     "Vector" [sliderWidgetM 1  , sliderWidgetM 1  , sliderWidgetM 1]   []
+            --               , Port "shear"     "Vector" [sliderWidgetM 0  , sliderWidgetM 0  , sliderWidgetM 0]   []
+            --               , Port "pivot"     "Vector" [sliderWidgetT 0  , sliderWidgetT 0  , sliderWidgetT 0]   []
+            --               ]
+            --         , Port "material" "Material" [dropDown2 "Material"]
+            --               [ Port "layer"     "Layer" [setBTCtx $ dropDown "Fill"   , sliderWidgetB 1 , setBTCtx  $ colorTile "#8c344a"] []
+            --             --   , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke" , sliderWidgetM 8 , setBTCtx $ colorTile "#000000"] []
+            --               , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke"]
+            --                     [ Port "type"  "Type"  [fixedSpring 20, sliderWidgetM 8]                []
+            --                     , Port "color" "Color" [fixedSpring 20, setBTCtx $ colorPreview "#000000"] []
+            --                     ]
+            --               , Port "layer"     "Layer" [setBTCtx $ dropDown "Shadow" , sliderWidgetM 16, setBTCtx $ colorTile "#000000"] []
+            --               , Port "new layer" "Layer" [setTCtx  $ newLayer]   []
+            --               ]
+            --         -- , Port "name"     "Text"   [textWidget "name"] []
+            --         ]
+            --         [ Port "out"      "Int"    [sliderWidget 0] [] ]
+            --         NormalNode  [Hovered]
+
+                 Node (Point 250 200) Nothing
+                     [ Port "type"      "Type"   [dropDown "Polygon", sliderWidget 8]    []
+                     -- , Port "enabled"   "Bool"   [toggleWidget True] []
+                     , Port "radius"    "Number" [sliderWidget 20]  []
+                     , Port "transform" "Transform" [dropDown "Transform"]
+                           [ Port "translate" "Vector" [sliderWidget 0.3, sliderWidget 0.7, sliderWidget 0.2] []
+                           , Port "rotate"    "Vector" [sliderWidget 0  , sliderWidget 0  , sliderWidget 0]   []
+                           , Port "scale"     "Vector" [sliderWidget 1  , sliderWidget 1  , sliderWidget 1]   []
+                           , Port "shear"     "Vector" [sliderWidget 0  , sliderWidget 0  , sliderWidget 0]   []
+                           , Port "pivot"     "Vector" [sliderWidget 0  , sliderWidget 0  , sliderWidget 0]   []
+                           ]
+                     , Port "material" "Material" [dropDown "Material"]
+                           [ Port "layer"     "Layer" [dropDown "Fill"   , sliderWidgetB 1 , colorTile "#8c344a"] []
+                         --   , Port "layer"     "Layer" [setBTCtx $ dropDown "Stroke" , sliderWidgetM 8 , setBTCtx $ colorTile "#000000"] []
+                           , Port "layer"     "Layer" [dropDown "Stroke"]
+                                 [ Port "type"  "Type"  [sliderWidget 8]                []
+                                 , Port "color" "Color" [colorPreview "#000000"] []
+                                 ]
+                           , Port "layer"     "Layer" [dropDown "Shadow" , sliderWidgetM 16, colorTile "#000000"] []
+                           , Port "new layer" "Layer" [setTCtx  $ newLayer]   []
+                           ]
+                     -- , Port "name"     "Text"   [textWidget "name"] []
+                     ]
+                     [ Port "out"      "Int"    [sliderWidget 0] [] ]
+                     NormalNode2  [Hovered]
               ]
 
   let svg = render _w _h
         --   $ strokeWidth 4 $ strokeColor "#ff0000" $ rect 100 100
         --   $ fill "#ff0000" $ mconcat (renderNode <$> nodes)
         --   $ mconcat [navPanel, move 400 0 graphPanel, vsep 400]
-          $ mconcat [navPanel, move 400 0 graphPanel, vsep 400
+        --   $ mconcat [navPanel, move 400 0 graphPanel, vsep 400
+          $ mconcat [move 0 0 graphPanel
                     , move 630 600 $ fill (typeColor "Int") $ link (Point 0 0) (Point 140 0)
                     ] <> mconcat (renderNode <$> nodes)
         --   $ opacity 0.2 $ fill "rgb(255,255,255)" (circle 50 + rect 30 100)
