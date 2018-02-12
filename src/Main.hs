@@ -1438,13 +1438,13 @@ main = do
             --         [ Port "in" "Number"  (sliderWidget 0) [] ]
             --         [ Port "out" "Number" (sliderWidget 0) [] ]
             --         CompactNode  []
-            --   , Node (Point 750 800) Nothing
-            --         [ Port "enabled" "Bool"   (toggleWidget True) []
-            --         , Port "blur"    "Number" (sliderWidget 0.3)  []
-            --         , Port "name"    "Text"   (textWidget "name") []
-            --         ]
-            --         [ Port "out" "Number" (sliderWidget 0.3) [] ]
-            --         CompactNode2 [Hovered]
+               Node (Point 750 800) Nothing
+                    [ Port "enabled" "Bool"   [toggleWidget True] []
+                    , Port "blur"    "Number" [sliderWidget 0.3]  []
+                    , Port "name"    "Text"   [textWidget "name"] []
+                    ]
+                    [ Port "out" "Number" [sliderWidget 0.3] [] ]
+                    CompactNode2 [Hovered]
             --   , Node (Point 750 1000) Nothing
             --         []
             --         [ Port "out" "Number" "0" [] ]
@@ -1475,7 +1475,7 @@ main = do
             --         [ Port "out"      "Int"    [sliderWidget 0] [] ]
             --         NormalNode  [Hovered]
 
-                 Node (Point 250 200) Nothing
+            ,     Node (Point 250 200) Nothing
                      [ Port "type"      "Type"   [dropDown "Polygon", sliderWidget 8]    []
                      -- , Port "enabled"   "Bool"   [toggleWidget True] []
                      , Port "radius"    "Number" [sliderWidget 20]  []
